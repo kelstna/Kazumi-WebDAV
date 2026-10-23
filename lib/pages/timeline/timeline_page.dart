@@ -1,8 +1,10 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/card/bangumi_timeline_card.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
@@ -34,6 +36,8 @@ class TimelinePage extends StatefulWidget {
 class _TimelinePageState extends State<TimelinePage> {
   TimelineController get _controller => widget.controller;
   late final bool _showRating;
+  ScrollPosition? _innerPosition;
+  bool _showToTop = false;
 
   @override
   void initState() {
@@ -175,31 +179,52 @@ class _TimelinePageState extends State<TimelinePage> {
           ),
         );
         return Scaffold(
-          appBar: SysAppBar(
-            needTopOffset: false,
-            toolbarHeight: 72,
-            title: narrowPortrait
-                ? _buildSeasonPicker(context, loading: loading, inAppBar: true)
-                : Text(
-                    '时间表',
-                    style: theme.textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: _TimelineOptionsButton(
-                  availableWidth: constraints.maxWidth,
-                  sort: _controller.sort,
-                  filterCount: _controller.activeFilterCount,
-                  onPressed: _showOptions,
-                ),
+          floatingActionButton: AnimatedScale(
+            scale: _showToTop ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            child: IgnorePointer(
+              ignoring: !_showToTop,
+              child: FloatingActionButton.small(
+                tooltip: '回到顶部',
+                onPressed: () {
+                  final position = _innerPosition;
+                  if (position == null ||
+                      !position.hasContentDimensions ||
+                      !position.hasPixels) {
+                    return;
+                  }
+                  position.animateTo(
+                    0,
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOut,
+                  );
+                },
+                child: const Icon(Icons.arrow_upward_rounded),
               ),
-            ],
+            ),
           ),
           body: SafeArea(
-            top: false,
-            child: LayoutBuilder(
+            top: true,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification.depth > 0) {
+                  final notificationContext = notification.context;
+                  if (notificationContext != null) {
+                    final position =
+                        Scrollable.maybeOf(notificationContext)?.position;
+                    if (position != null) {
+                      _innerPosition = position;
+                    }
+                  }
+                  final show = notification.metrics.pixels > 600;
+                  if (show != _showToTop && mounted) {
+                    setState(() => _showToTop = show);
+                  }
+                }
+                return false;
+              },
+              child: LayoutBuilder(
                 builder: (context, viewport) => NestedScrollView(
                       // Keep the outer viewport clamped and unstretched so tabs stay fixed.
                       physics: const ClampingScrollPhysics(),
@@ -208,6 +233,33 @@ class _TimelinePageState extends State<TimelinePage> {
                         scrollbars: false,
                       ),
                       headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                        SliverAppBar(
+                          floating: true,
+                          snap: true,
+                          primary: false,
+                          backgroundColor: theme.scaffoldBackgroundColor,
+                          surfaceTintColor: Colors.transparent,
+                          titleSpacing: 16,
+                          title: narrowPortrait
+                              ? _buildSeasonPicker(context,
+                                  loading: loading, inAppBar: true)
+                              : Text(
+                                  '时间表',
+                                  style: theme.textTheme.headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                          actions: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: _TimelineOptionsButton(
+                                availableWidth: constraints.maxWidth,
+                                sort: _controller.sort,
+                                filterCount: _controller.activeFilterCount,
+                                onPressed: _showOptions,
+                              ),
+                            ),
+                          ],
+                        ),
                         if (seasonHeader != null)
                           SliverToBoxAdapter(
                             child: Padding(
@@ -262,7 +314,7 @@ class _TimelinePageState extends State<TimelinePage> {
                                       ),
                                   ],
                                 ),
-                    )),
+                    ))),
           ),
         );
       });

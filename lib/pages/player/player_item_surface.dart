@@ -1,7 +1,11 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:kazumi/services/storage/storage.dart';
 
 class PlayerItemSurface extends StatefulWidget {
   const PlayerItemSurface({
@@ -37,6 +41,10 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         pauseUponEnteringBackgroundMode: false,
         fit: aspectRatioMode.fit,
         subtitleViewConfiguration: SubtitleViewConfiguration(
+          // libass 模式下字幕由 mpv 画进视频帧（保留 ASS 特效、支持 PGS），
+          // 这里必须关掉 Flutter 文本层，否则文字字幕会叠两层。
+          visible:
+              GStorage.getSetting(SettingsKeys.subtitleRenderMode) == 'simple',
           style: TextStyle(
             color: Colors.pink,
             fontSize: 48.0,

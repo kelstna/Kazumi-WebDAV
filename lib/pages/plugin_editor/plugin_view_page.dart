@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -21,6 +24,7 @@ import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/plugin/plugin_import_parser.dart';
+import 'package:kazumi/services/storage/storage.dart';
 
 class PluginViewPage extends StatefulWidget {
   const PluginViewPage({super.key, required this.controller});
@@ -161,6 +165,13 @@ class _PluginViewPageState extends State<PluginViewPage> {
   Future<void> _reorder(int oldIndex, int newIndex) async {
     try {
       await _controller.onReorder(oldIndex, newIndex);
+      // OpenList 不写进 plugins.json，单独记住它的位置。
+      final index = _controller.pluginList
+          .indexWhere((plugin) => plugin.isOpenListSource);
+      if (index >= 0) {
+        await GStorage.putSetting<int>(
+            SettingsKeys.openListSourceIndex, index);
+      }
     } catch (_) {
       KazumiDialog.showToast(message: '保存规则顺序失败');
     }
@@ -236,6 +247,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
                   final query = _search.text.trim().toLowerCase();
                   final visible = all
                       .where((p) =>
+                          (!_selecting || !p.isOpenListSource) &&
                           (p.name.toLowerCase().contains(query) ||
                               p.baseUrl.toLowerCase().contains(query)) &&
                           (!_updatesOnly ||
@@ -372,6 +384,47 @@ class _PluginViewPageState extends State<PluginViewPage> {
                       final updatable =
                           _controller.pluginUpdateStatus(plugin) ==
                               PluginUpdateAvailability.updatable;
+                      if (plugin.isOpenListSource) {
+                        return Padding(
+                          key: ValueKey(plugin.name),
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Material(
+                            color: colors.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(24),
+                            clipBehavior: Clip.antiAlias,
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 6),
+                              leading: CircleAvatar(
+                                backgroundColor: colors.secondaryContainer,
+                                child: Icon(Icons.cloud_queue_rounded,
+                                    color: colors.onSecondaryContainer),
+                              ),
+                              title: const Text(
+                                'WebDAV 片库',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              subtitle:
+                                  const Text('内置来源 · WebDAV 地址与账号'),
+                              onTap: () => unawaited(context
+                                  .pushNamed('/settings/plugin/webdav')),
+                              trailing: canReorder
+                                  ? Tooltip(
+                                      message: '拖动排序',
+                                      child: ReorderableDragStartListener(
+                                        index: index,
+                                        child: const SizedBox.square(
+                                          dimension: 48,
+                                          child: Icon(
+                                              Icons.drag_indicator_rounded),
+                                        ),
+                                      ),
+                                    )
+                                  : const Icon(Icons.chevron_right_rounded),
+                            ),
+                          ),
+                        );
+                      }
                       return RuleCard(
                         key: ValueKey(plugin.name),
                         title: plugin.name,

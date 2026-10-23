@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 import 'dart:io';
 import 'package:kazumi/pages/player/player_item_panel.dart';
@@ -30,6 +33,8 @@ import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 import 'package:kazumi/pages/player/danmaku_source_sheet.dart';
+import 'package:kazumi/pages/player/audio_track_sheet.dart';
+import 'package:kazumi/pages/player/subtitle_picker_sheet.dart';
 import 'package:kazumi/pages/player/player_item_surface.dart';
 import 'package:mobx/mobx.dart' as mobx;
 import 'package:kazumi/pages/my/my_controller.dart';
@@ -1242,6 +1247,20 @@ class _PlayerItemState extends State<PlayerItem>
     showVideoDetailsSheet(context, playerController: playerController);
   }
 
+  void showSubtitleSheet() {
+    unawaited(showSubtitlePickerSheet(
+      context,
+      controller: playerController.subtitle,
+    ));
+  }
+
+  void showAudioTrackSheet() {
+    unawaited(showAudioTrackPickerSheet(
+      context,
+      controller: playerController.audioTrack,
+    ));
+  }
+
   void showSyncPlayPanel() {
     showSyncPlaySheet(
       context,
@@ -1546,6 +1565,8 @@ class _PlayerItemState extends State<PlayerItem>
                                 _handlePlayerMenuVisibilityChanged,
                             handleDanmaku: handleDanmaku,
                             showVideoInfo: showVideoInfo,
+                            showSubtitleSheet: showSubtitleSheet,
+                            showAudioTrackSheet: showAudioTrackSheet,
                             showSyncPlayPanel: showSyncPlayPanel,
                             pauseForTimedShutdown: widget.pauseForTimedShutdown,
                             disableAnimations: widget.disableAnimations,

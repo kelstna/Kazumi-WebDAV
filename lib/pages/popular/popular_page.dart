@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -28,6 +31,7 @@ class PopularPage extends StatefulWidget {
 
 class _PopularPageState extends State<PopularPage> {
   late final ScrollController scrollController;
+  bool _showToTop = false;
   PopularController get popularController => widget.controller;
 
   @override
@@ -51,6 +55,10 @@ class _PopularPageState extends State<PopularPage> {
 
   void scrollListener() {
     popularController.scrollOffset = scrollController.offset;
+    final show = scrollController.offset > 600;
+    if (show != _showToTop && mounted) {
+      setState(() => _showToTop = show);
+    }
     if (scrollController.position.pixels >=
             scrollController.position.maxScrollExtent - 200 &&
         !popularController.isLoadingMore) {
@@ -115,10 +123,20 @@ class _PopularPageState extends State<PopularPage> {
               })),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => scrollController.animateTo(0,
-            duration: const Duration(milliseconds: 350), curve: Curves.easeOut),
-        child: const Icon(Icons.arrow_upward),
+      floatingActionButton: AnimatedScale(
+        scale: _showToTop ? 1 : 0,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        child: IgnorePointer(
+          ignoring: !_showToTop,
+          child: FloatingActionButton.small(
+            tooltip: '回到顶部',
+            onPressed: () => scrollController.animateTo(0,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeOut),
+            child: const Icon(Icons.arrow_upward_rounded),
+          ),
+        ),
       ),
     );
   }

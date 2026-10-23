@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 /// 集数源站 URL 归一化。
 ///
 /// 把插件抓取到的原始 `href`（可能是相对路径、缺协议、带尾斜杠或多余噪声）
@@ -78,3 +81,42 @@ String normalizeEpisodeUrl(String baseUrl, String raw) {
 }
 
 bool _isHttpScheme(String scheme) => scheme == 'http' || scheme == 'https';
+
+/// 可以直接交给播放器的媒体直链后缀（本地片库 / anime-server 的 /raw 接口等）。
+const Set<String> _directMediaExtensions = {
+  '.mkv',
+  '.mp4',
+  '.m4v',
+  '.webm',
+  '.avi',
+  '.mov',
+  '.flv',
+  '.wmv',
+  '.ts',
+  '.m2ts',
+  '.mpg',
+  '.mpeg',
+  '.rmvb',
+  '.rm',
+  '.ogv',
+  '.3gp',
+};
+
+/// 判断一个集数链接是否本身就是媒体文件直链。
+///
+/// 这类链接不需要再开 WebView 解析，直接交给 mpv 播放：
+/// 既省掉一次解析，避免 WebView 无法渲染 MKV 导致的失败，
+/// 也让带内封字幕的原始文件原样送达播放器（字幕轨可被枚举/切换）。
+bool looksLikeDirectMediaUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.path.isEmpty) {
+    return false;
+  }
+  final lastSegment = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last;
+  final dot = lastSegment.lastIndexOf('.');
+  if (dot < 0) {
+    return false;
+  }
+  final extension = lastSegment.substring(dot).toLowerCase();
+  return _directMediaExtensions.contains(extension);
+}

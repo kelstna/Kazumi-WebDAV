@@ -1,10 +1,12 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
@@ -66,6 +68,10 @@ class _CollectPageState extends State<CollectPage> with KazumiDialogOwner {
   void _changeLayout(CollectLayout layout) {
     if (_layout == layout) return;
     setState(() => _layout = layout);
+    // 页面内切换即视为新的默认布局：下次启动/回到追番页保持用户最后的选择。
+    unawaited(
+      GStorage.putSetting(SettingsKeys.defaultCollectLayout, layout.name),
+    );
   }
 
   Future<void> _changeType(BangumiItem item, CollectType type) async {
@@ -108,36 +114,31 @@ class _CollectPageState extends State<CollectPage> with KazumiDialogOwner {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: SysAppBar(
-        needTopOffset: false,
-        toolbarHeight: 72,
-        title: Text(
-          '追番',
-          style: Theme.of(context)
-              .textTheme
-              .headlineSmall
-              ?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Tooltip(
-              message: '同步收藏',
-              child: StateActionButton.tonal(
-                text: '同步',
-                onPressed:
-                    _syncDialogOpen || _pendingIds.isNotEmpty ? null : _sync,
-                icon: Icons.sync_rounded,
-              ),
-            ),
-          ),
-        ],
-      ),
       body: SafeArea(
-        top: false,
+        top: true,
         bottom: false,
         child: Observer(
           builder: (context) => CollectLibraryView(
+            title: Text(
+              '追番',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            actions: [
+              Tooltip(
+                message: '同步收藏',
+                child: StateActionButton.tonal(
+                  text: '同步',
+                  onPressed: _syncDialogOpen || _pendingIds.isNotEmpty
+                      ? null
+                      : _sync,
+                  icon: Icons.sync_rounded,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             entries: collectController.collectibles.toList(),
             showRating: GStorage.getSetting(SettingsKeys.showRating),
             layout: _layout,

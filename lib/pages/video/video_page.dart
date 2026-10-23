@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
@@ -60,6 +63,7 @@ class _VideoPageState extends State<VideoPage>
   HistoryController get historyController => widget.historyController;
   DownloadController get downloadController => widget.downloadController;
   late bool playResume;
+  late String _episodeLabelMode;
   bool showDebugLog = false;
   List<String> webviewLogLines = [];
   StreamSubscription<String>? _logSubscription;
@@ -87,6 +91,8 @@ class _VideoPageState extends State<VideoPage>
     tabController = TabController(length: 2, vsync: this);
 
     playResume = GStorage.getSetting(SettingsKeys.playResume);
+    _episodeLabelMode =
+        GStorage.getSetting<String>(SettingsKeys.episodeLabelMode);
     disableAnimations =
         GStorage.getSetting(SettingsKeys.playerDisableAnimations);
     _pipModeListener = mobx.reaction<bool>(
@@ -258,6 +264,15 @@ class _VideoPageState extends State<VideoPage>
         currentRoad: currentRoad,
         offset: offset,
         playerController: playerController);
+  }
+
+  void _toggleEpisodeLabelMode() {
+    final next = _episodeLabelMode == 'file' ? 'number' : 'file';
+    setState(() => _episodeLabelMode = next);
+    unawaited(GStorage.putSetting<String>(
+      SettingsKeys.episodeLabelMode,
+      next,
+    ));
   }
 
   void _revealCurrentEpisode() {
@@ -509,6 +524,8 @@ class _VideoPageState extends State<VideoPage>
         return EpisodeSelectionPanel(
           key: _episodePanelKey,
           title: videoPageController.title,
+          episodeLabelMode: _episodeLabelMode,
+          onToggleEpisodeLabelMode: _toggleEpisodeLabelMode,
           roads: videoPageController.roadList,
           selectedRoad: videoPageController.selectedEpisode.road,
           selectedEpisode: videoPageController.selectedEpisode.episode,

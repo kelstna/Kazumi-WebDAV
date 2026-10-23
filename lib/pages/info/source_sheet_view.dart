@@ -1,14 +1,21 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 part of 'source_sheet.dart';
 
 class _SourceSearchGroup {
   const _SourceSearchGroup({
     required this.name,
+    required this.label,
     required this.keyword,
     required this.status,
     required this.results,
   });
 
   final String name;
+
+  /// 界面显示名（内置 WebDAV 来源显示为「WebDAV」）。
+  final String label;
   final String keyword;
   final PluginSearchStatus status;
   final List<SearchItem> results;
@@ -197,7 +204,7 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
                   header: true,
                   button: true,
                   expanded: !collapsed,
-                  label: '来源规则：${group.name}，${group.statusLabel}',
+                  label: '来源规则：${group.label}，${group.statusLabel}',
                   onTap: toggle,
                   excludeSemantics: true,
                   child: Material(
@@ -213,7 +220,7 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
                             children: [
                               Expanded(
                                   child: Text(
-                                group.name,
+                                group.label,
                                 style: theme.textTheme.labelLarge?.copyWith(
                                   color: colors.onSurfaceVariant,
                                 ),
@@ -352,7 +359,7 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
         child: KazumiMenuButton(
           animated: true,
           builder: (context, toggle) => IconButton(
-            tooltip: '${group.name} 的更多操作',
+            tooltip: '${group.label} 的更多操作',
             icon: const Icon(Icons.more_horiz_rounded, size: 20),
             onPressed: toggle,
           ),
@@ -388,7 +395,7 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
       onTap: () => widget.onPlay(group.name, result),
       child: Semantics(
         button: true,
-        label: '播放 ${result.name}，来源 ${group.name}',
+        label: '播放 ${result.name}，来源 ${group.label}',
         excludeSemantics: true,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 64),

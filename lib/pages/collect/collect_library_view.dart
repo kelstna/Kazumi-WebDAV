@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
@@ -31,8 +34,12 @@ class CollectLibraryView extends StatefulWidget {
     required this.canEdit,
     required this.layout,
     required this.onLayoutChanged,
+    required this.title,
+    this.actions = const [],
   });
 
+  final Widget title;
+  final List<Widget> actions;
   final List<CollectedBangumi> entries;
   final bool showRating;
   final ValueChanged<BangumiItem> onOpen;
@@ -50,18 +57,33 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
   final _libraryFocus = FocusNode();
-  // Keep tab animations alive when the category scroll view is replaced.
-  final _categoriesKey = GlobalKey();
   late TabController _tabController;
   bool? _disableAnimations;
-  final _scrollControllers = {
-    for (final type in _collectCategories) type: ScrollController(),
-  };
+  ScrollPosition? _activePosition;
   PageStorageBucket _resultsStorage = PageStorageBucket();
   CollectType? _selectedType = CollectType.watching;
   CollectSort _sort = CollectSort.recentlyChanged;
   String _query = '';
   bool _searchExpanded = false;
+  bool _showToTop = false;
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth == 0) {
+      return false;
+    }
+    final notificationContext = notification.context;
+    if (notificationContext != null) {
+      final position = Scrollable.maybeOf(notificationContext)?.position;
+      if (position != null) {
+        _activePosition = position;
+      }
+    }
+    final show = notification.metrics.pixels > 600;
+    if (show != _showToTop && mounted) {
+      setState(() => _showToTop = show);
+    }
+    return false;
+  }
 
   @override
   void didChangeDependencies() {
@@ -92,23 +114,23 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
     _searchController.dispose();
     _searchFocus.dispose();
     _libraryFocus.dispose();
-    for (final controller in _scrollControllers.values) {
-      controller.dispose();
-    }
     super.dispose();
   }
 
   void _resetResults() {
     // Reset saved offsets for unmounted categories too.
     _resultsStorage = PageStorageBucket();
-    for (final controller in _scrollControllers.values) {
-      if (controller.hasClients) controller.jumpTo(0);
+    final position = _activePosition;
+    if (position != null && position.hasContentDimensions) {
+      position.jumpTo(0);
     }
   }
 
   void _focusSearch() {
-    final controller = _scrollControllers[_selectedType]!;
-    if (controller.hasClients) controller.jumpTo(0);
+    final position = _activePosition;
+    if (position != null && position.hasContentDimensions) {
+      position.jumpTo(0);
+    }
     setState(() => _searchExpanded = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _searchFocus.requestFocus();
@@ -142,9 +164,6 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
   @override
   Widget build(BuildContext context) {
     final query = CollectLibraryQuery(widget.entries, _query);
-    final platform = Theme.of(context).platform;
-    final mobile =
-        platform == TargetPlatform.android || platform == TargetPlatform.iOS;
 
     return CallbackShortcuts(
       bindings: {
@@ -159,69 +178,119 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
         autofocus: true,
         child: LayoutBuilder(builder: (context, constraints) {
           final compact = constraints.maxWidth < 600;
-          final paged = mobile &&
-              MediaQuery.orientationOf(context) == Orientation.portrait &&
-              constraints.maxHeight > 320;
           final width = constraints.maxWidth.clamp(0.0, 1560.0);
           final inset =
               (constraints.maxWidth - width) / 2 + (compact ? 16.0 : 32.0);
-          final header = _header(query, compact: compact);
-          return PageStorage(
-            bucket: _resultsStorage,
-            child: paged
-                ? Column(
-                    children: [
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: inset),
-                        child: header,
+          final colors = Theme.of(context).colorScheme;
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onScrollNotification,
+                  child: NestedScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                      SliverAppBar(
+                        floating: true,
+                        snap: true,
+                        primary: false,
+                        backgroundColor: colors.surface,
+                        surfaceTintColor: Colors.transparent,
+                        titleSpacing: 20,
+                        title: widget.title,
+                        actions: widget.actions,
                       ),
-                      Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: [
-                            for (final type in _collectCategories)
-                              HeroMode(
-                                enabled: type == _selectedType,
-                                child: _results(query, type, inset: inset),
-                              ),
-                          ],
+                      SliverOverlapAbsorber(
+                        handle: NestedScrollView.sliverOverlapAbsorberHandleFor(
+                            context),
+                        sliver: SliverPersistentHeader(
+                          pinned: true,
+                          delegate: _CategoriesHeaderDelegate(
+                            height: 56,
+                            color: colors.surface,
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(inset, 0, inset, 8),
+                              child: _categoriesRow(query, compact: compact),
+                            ),
+                          ),
                         ),
                       ),
                     ],
-                  )
-                : _results(query, _selectedType, inset: inset, header: header),
+                    body: PageStorage(
+                      bucket: _resultsStorage,
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          for (final type in _collectCategories)
+                            _resultsBody(query, type, inset: inset),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 16,
+                bottom: 16 + MediaQuery.paddingOf(context).bottom,
+                child: AnimatedScale(
+                  scale: _showToTop ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  child: IgnorePointer(
+                    ignoring: !_showToTop,
+                    child: FloatingActionButton.small(
+                      tooltip: '回到顶部',
+                      onPressed: () {
+                        final position = _activePosition;
+                        if (position == null ||
+                            !position.hasContentDimensions) {
+                          return;
+                        }
+                        position.animateTo(
+                          0,
+                          duration: const Duration(milliseconds: 350),
+                          curve: Curves.easeOut,
+                        );
+                      },
+                      child: const Icon(Icons.arrow_upward_rounded),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           );
         }),
       ),
     );
   }
 
-  Widget _header(CollectLibraryQuery query, {required bool compact}) {
+  Widget _categoriesRow(CollectLibraryQuery query, {required bool compact}) {
+    return Row(
+      children: [
+        Expanded(
+          child: _CollectCategories(
+            controller: _tabController,
+            count: query.count,
+          ),
+        ),
+        if (!compact)
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 16),
+            child: Text(
+              '${query.count(_selectedType)} 部',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _toolsRow(CollectLibraryQuery query, {required bool compact}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _CollectCategories(
-                key: _categoriesKey,
-                controller: _tabController,
-                count: query.count,
-              ),
-            ),
-            if (!compact)
-              Padding(
-                padding: const EdgeInsetsDirectional.only(start: 16),
-                child: Text(
-                  '${query.count(_selectedType)} 部',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
         Row(
           children: [
             if (!compact)
@@ -306,43 +375,50 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
         ),
       );
 
-  Widget _results(CollectLibraryQuery query, CollectType? type,
-      {required double inset, Widget? header}) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final entries = query.results(type, _sort);
-      final contentWidth = constraints.maxWidth - inset * 2;
-      return ScrollbarTheme(
-        data: ScrollbarTheme.of(context).copyWith(crossAxisMargin: 0),
-        child: CustomScrollView(
-          key: PageStorageKey('collect-results-${type?.value ?? 'all'}'),
-          controller: _scrollControllers[type],
-          semanticChildCount: entries.length,
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          slivers: [
-            if (header != null)
-              SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: inset),
-                sliver: SliverToBoxAdapter(child: header),
+  Widget _resultsBody(CollectLibraryQuery query, CollectType? type,
+      {required double inset}) {
+    return Builder(builder: (context) {
+      return LayoutBuilder(builder: (context, constraints) {
+        final compact = constraints.maxWidth < 600;
+        final entries = query.results(type, _sort);
+        final contentWidth = constraints.maxWidth - inset * 2;
+        return ScrollbarTheme(
+          data: ScrollbarTheme.of(context).copyWith(crossAxisMargin: 0),
+          child: CustomScrollView(
+            key: PageStorageKey('collect-results-${type?.value ?? 'all'}'),
+            semanticChildCount: entries.length,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              SliverOverlapInjector(
+                handle:
+                    NestedScrollView.sliverOverlapAbsorberHandleFor(context),
               ),
-            if (entries.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
+              SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: inset),
-                  child: _emptyState(query.count(null), type: type),
+                  child: _toolsRow(query, compact: compact),
                 ),
-              )
-            else
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                    inset, 0, inset, 24 + MediaQuery.paddingOf(context).bottom),
-                sliver: widget.layout == CollectLayout.cards
-                    ? _grid(entries, contentWidth, type: type)
-                    : _list(entries, contentWidth),
               ),
-          ],
-        ),
-      );
+              if (entries.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: inset),
+                    child: _emptyState(query.count(null), type: type),
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(inset, 0, inset,
+                      24 + MediaQuery.paddingOf(context).bottom),
+                  sliver: widget.layout == CollectLayout.cards
+                      ? _grid(entries, contentWidth, type: type)
+                      : _list(entries, contentWidth),
+                ),
+            ],
+          ),
+        );
+      });
     });
   }
 
@@ -456,5 +532,42 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
       icon: searching ? Icons.search_off_rounded : Icons.video_library_outlined,
       title: title,
     );
+  }
+}
+
+class _CategoriesHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _CategoriesHeaderDelegate({
+    required this.height,
+    required this.color,
+    required this.child,
+  });
+
+  final double height;
+  final Color color;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: color,
+      child: SizedBox(height: height, child: child),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _CategoriesHeaderDelegate oldDelegate) {
+    return oldDelegate.height != height ||
+        oldDelegate.color != color ||
+        oldDelegate.child != child;
   }
 }

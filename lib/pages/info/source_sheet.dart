@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -182,6 +185,7 @@ class _SourceSheetState extends State<SourceSheet> with KazumiDialogOwner {
             for (final plugin in _pluginsController.pluginList)
               plugin.name: _SourceSearchGroup(
                 name: plugin.name,
+                label: plugin.displayName,
                 keyword: _keywordFor(plugin.name),
                 status: widget.infoController.pluginSearchStatus[plugin.name] ??
                     PluginSearchStatus.pending,

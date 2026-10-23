@@ -1,8 +1,10 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 part of 'collect_library_view.dart';
 
 class _CollectCategories extends StatelessWidget {
   const _CollectCategories({
-    super.key,
     required this.controller,
     required this.count,
   });

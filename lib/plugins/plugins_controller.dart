@@ -1,8 +1,13 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:io';
 import 'dart:convert';
 import 'package:mobx/mobx.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:kazumi/plugins/plugins.dart';
+import 'package:kazumi/services/openlist/openlist_service.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/plugin/plugin_validity_tracker.dart';
 import 'package:kazumi/request/apis/plugin_catalog_api.dart';
 import 'package:kazumi/modules/plugin/plugin_http_module.dart';
@@ -111,6 +116,31 @@ abstract class _PluginsController with Store {
     } else {
       await _migrateLegacyPlugins(legacyDirectory);
     }
+    _ensureBuiltinPlugins();
+  }
+
+  /// 内置来源（OpenList）只常驻内存，不写进 plugins.json。
+  void _ensureBuiltinPlugins() {
+    final exists = pluginList.any((plugin) =>
+        pluginNameKey(plugin.name) ==
+        pluginNameKey(OpenListService.sourceName));
+    if (!exists) {
+      pluginList.add(Plugin.openList());
+    }
+    // 恢复拖动过的顺序（OpenList 不写进 plugins.json，单独记一个索引）。
+    final current =
+        pluginList.indexWhere((plugin) => plugin.isOpenListSource);
+    if (current < 0 || pluginList.length <= 1) {
+      return;
+    }
+    final savedIndex =
+        GStorage.getSetting<int>(SettingsKeys.openListSourceIndex);
+    final target = savedIndex.clamp(0, pluginList.length - 1);
+    if (target == current) {
+      return;
+    }
+    final plugin = pluginList.removeAt(current);
+    pluginList.insert(target, plugin);
   }
 
   // Before 1.5.1 each rule was a separate JSON file in the parent directory.
@@ -126,8 +156,10 @@ abstract class _PluginsController with Store {
     await _savePlugins();
   }
 
-  List<dynamic> _pluginListToJson() =>
-      [for (final plugin in pluginList) plugin.toJson()];
+  List<dynamic> _pluginListToJson() => [
+        for (final plugin in pluginList)
+          if (!plugin.isOpenListSource) plugin.toJson(),
+      ];
 
   Future<void> removePlugin(Plugin plugin) {
     return _mutateAndPersist(

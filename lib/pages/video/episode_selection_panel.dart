@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,6 +10,7 @@ import 'package:scrollview_observer/scrollview_observer.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/modules/roads/road_module.dart';
+import 'package:kazumi/utils/episode_number.dart';
 
 class EpisodeSelectionPanel extends StatefulWidget {
   const EpisodeSelectionPanel({
@@ -21,6 +25,8 @@ class EpisodeSelectionPanel extends StatefulWidget {
     this.isOffline = false,
     this.isPlaying = false,
     this.disableAnimations = false,
+    this.episodeLabelMode = 'number',
+    this.onToggleEpisodeLabelMode,
   });
 
   final String title;
@@ -33,6 +39,10 @@ class EpisodeSelectionPanel extends StatefulWidget {
   final bool isOffline;
   final bool isPlaying;
   final bool disableAnimations;
+
+  /// `number` = 按集数显示（第N集），`file` = 显示完整文件名。
+  final String episodeLabelMode;
+  final VoidCallback? onToggleEpisodeLabelMode;
 
   @override
   EpisodeSelectionPanelState createState() => EpisodeSelectionPanelState();
@@ -169,6 +179,18 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                           ),
                         ),
                         IconButton(
+                          tooltip: widget.episodeLabelMode == 'number'
+                              ? '显示文件名'
+                              : '显示集数',
+                          onPressed: widget.onToggleEpisodeLabelMode,
+                          icon: Icon(
+                            widget.episodeLabelMode == 'number'
+                                ? Icons.text_fields_rounded
+                                : Icons.numbers_rounded,
+                            size: 20,
+                          ),
+                        ),
+                        IconButton(
                           tooltip: '定位当前集',
                           onPressed: _canLocate ? revealCurrentEpisode : null,
                           icon: const Icon(Icons.my_location_rounded, size: 20),
@@ -206,13 +228,20 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                     itemCount: count,
                     itemBuilder: (context, index) {
                       final episode = index + 1;
-                      final name = index < road!.identifier.length &&
+                      final rawName = index < road!.identifier.length &&
                               road.identifier[index].trim().isNotEmpty
                           ? road.identifier[index]
                           : '第$episode集';
+                      final byNumber = widget.episodeLabelMode != 'file';
+                      final parsed = parseEpisodeNumber(rawName);
+                      final name = byNumber && parsed != null
+                          ? '第$parsed集'
+                          : rawName;
                       return _EpisodeRow(
                         key: ValueKey('$_visibleRoad:$episode'),
                         name: name,
+                        // 显示文件名（或识别不出集数）时不省略，完整换行。
+                        wrapName: !byNumber || parsed == null,
                         first: index == 0,
                         last: index == count - 1,
                         selected: _visibleRoad == widget.selectedRoad &&
@@ -519,10 +548,14 @@ class _EpisodeRow extends StatefulWidget {
     required this.isOffline,
     required this.disableAnimations,
     required this.onTap,
+    this.wrapName = false,
     this.download,
   });
 
   final String name;
+
+  /// 文件名模式：不省略、整段换行显示。
+  final bool wrapName;
   final bool first;
   final bool last;
   final bool selected;
@@ -657,8 +690,11 @@ class _EpisodeRowState extends State<_EpisodeRow>
                     children: [
                       Text(
                         widget.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: widget.wrapName ? null : 2,
+                        softWrap: true,
+                        overflow: widget.wrapName
+                            ? TextOverflow.visible
+                            : TextOverflow.ellipsis,
                         style: theme.textTheme.bodyLarge?.copyWith(
                           color: foreground,
                           fontWeight: widget.selected

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -20,6 +23,8 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/services/player/audio_controller.dart';
+import 'package:kazumi/services/player/audio_track/player_audio_track_controller.dart';
+import 'package:kazumi/services/player/subtitle/player_subtitle_controller.dart';
 import 'package:kazumi/utils/async_session.dart';
 import 'package:kazumi/utils/device.dart';
 
@@ -44,6 +49,12 @@ class PlayerController implements Disposable {
   final PlayerPanelController panel = PlayerPanelController();
   final PlayerScreenshotController screenshots = PlayerScreenshotController();
   final PlayerDebugController debug = PlayerDebugController();
+
+  /// 内封 / 外挂字幕选择与字幕延迟。
+  final PlayerSubtitleController subtitle = PlayerSubtitleController();
+
+  /// 多音轨选择与开播自动选轨。
+  final PlayerAudioTrackController audioTrack = PlayerAudioTrackController();
 
   late final PlayerDanmakuController danmaku;
   late final PlayerPlaybackController playback = PlayerPlaybackController(
@@ -219,6 +230,17 @@ class PlayerController implements Disposable {
       return false;
     }
 
+    await subtitle.attach(
+      player,
+      videoUrl: params.videoUrl,
+      isLocalPlayback: params.isLocalPlayback,
+      headers: params.httpHeaders,
+    );
+    await audioTrack.attach(player);
+    if (!_ownsInitialization(initialization, player)) {
+      return false;
+    }
+
     if (isDesktop()) {
       final freshStart = playback.volume == -1;
       if (freshStart) {
@@ -375,6 +397,16 @@ class PlayerController implements Disposable {
   @override
   void dispose() {
     beginShutdown();
+    final shutdown = _shutdownFuture;
+    if (shutdown != null) {
+      unawaited(shutdown.whenComplete(() {
+        subtitle.dispose();
+        audioTrack.dispose();
+      }));
+    } else {
+      subtitle.dispose();
+      audioTrack.dispose();
+    }
   }
 
   /// Starts the idempotent player shutdown without blocking route navigation.
@@ -413,6 +445,8 @@ class PlayerController implements Disposable {
     _volumeGestureSyncTimer?.cancel();
     FlutterVolumeController.removeListener();
     await Future.wait([
+      subtitle.detach(),
+      audioTrack.detach(),
       audioController.deactivate(),
       playback.stop(),
       _restoreSystemVolumeUi(),

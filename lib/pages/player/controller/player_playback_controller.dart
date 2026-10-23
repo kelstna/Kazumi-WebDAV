@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 // ignore_for_file: library_private_types_in_public_api
 
 import 'dart:io';
@@ -284,6 +287,9 @@ abstract class _PlayerPlaybackController with Store {
     autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
     playerDebugMode = GStorage.getSetting(SettingsKeys.playerDebugMode);
 
+    final bool useLibass =
+        GStorage.getSetting(SettingsKeys.subtitleRenderMode) != 'simple';
+
     if (!canInstall()) {
       return null;
     }
@@ -294,6 +300,12 @@ abstract class _PlayerPlaybackController with Store {
           osc: false,
           logLevel: MPVLogLevel.values[debug.playerLogLevel],
           adBlocker: adBlockerEnabled,
+          // 默认走 libass：保留 ASS 特效/字体，并能渲染 PGS 等图形字幕。
+          // Android 上 libass 必须提供一个内置字体才能初始化 fontconfig。
+          libass: useLibass,
+          libassAndroidFont:
+              useLibass ? 'assets/fonts/MiSans-Regular.ttf' : null,
+          libassAndroidFontName: useLibass ? 'MiSans' : null,
         ),
       ),
     );

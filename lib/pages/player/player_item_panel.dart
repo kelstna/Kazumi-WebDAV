@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 import 'dart:io';
 
@@ -55,6 +58,8 @@ class PlayerItemPanel extends StatefulWidget {
     required this.handleDanmaku,
     required this.skipOP,
     required this.showVideoInfo,
+    required this.showSubtitleSheet,
+    required this.showAudioTrackSheet,
     required this.showSyncPlayPanel,
     required this.pauseForTimedShutdown,
     this.disableAnimations = false,
@@ -83,6 +88,8 @@ class PlayerItemPanel extends StatefulWidget {
   final VoidCallback onNextEpisode;
   final VoidCallback skipOP;
   final VoidCallback showVideoInfo;
+  final VoidCallback showSubtitleSheet;
+  final VoidCallback showAudioTrackSheet;
   final VoidCallback showSyncPlayPanel;
   final VoidCallback pauseForTimedShutdown;
   final bool disableAnimations;
@@ -704,6 +711,18 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           child: const Text('超分辨率', style: TextStyle(color: Colors.white)),
           items: _superResolutionItems,
         ),
+        IconButton(
+          color: Colors.white,
+          icon: const Icon(Icons.subtitles_outlined),
+          tooltip: '字幕',
+          onPressed: widget.showSubtitleSheet,
+        ),
+        IconButton(
+          color: Colors.white,
+          icon: const Icon(Icons.audiotrack_rounded),
+          tooltip: '音轨',
+          onPressed: widget.showAudioTrackSheet,
+        ),
         _menuButton(
           child: Text(
               playerController.playback.playerSpeed == 1
@@ -875,6 +894,13 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     color: Colors.white,
                   ),
                 ),
+              if (compact)
+                IconButton(
+                  color: Colors.white,
+                  icon: const Icon(Icons.subtitles_outlined),
+                  tooltip: '字幕',
+                  onPressed: widget.showSubtitleSheet,
+                ),
               if (compact) _buildDanmakuToggleButton(context),
               PlayerPanelHoldCollectButton(
                 acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
@@ -905,6 +931,14 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                         child: const Text('超分辨率')),
                     _syncPlayMenuItem,
                   ],
+                  KazumiMenuItem(
+                    onPressed: widget.showAudioTrackSheet,
+                    label: '音轨',
+                  ),
+                  KazumiMenuItem(
+                    onPressed: widget.showSubtitleSheet,
+                    label: '字幕',
+                  ),
                   KazumiMenuItem(
                     onPressed: widget.showDanmakuSwitch,
                     label: '弹幕切换',

@@ -1,4 +1,8 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_modular/flutter_modular.dart';
@@ -7,6 +11,7 @@ import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/bean/settings/settings_dropdown_tile.dart';
 import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
 import 'package:kazumi/pages/settings/low_memory_mode_settings.dart';
+import 'package:kazumi/services/player/subtitle/subtitle_font_service.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
@@ -40,6 +45,9 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late bool autoPlayNext;
   late bool backgroundPlayback;
   late bool brightnessVolumeGesture;
+  late bool autoSelectSubtitle;
+  late String subtitleRenderMode;
+  late String autoSelectAudioTrack;
   late int playerButtonSkipTime;
   late int playerArrowKeySkipTime;
   late int playerLogLevel;
@@ -78,6 +86,12 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
 
     brightnessVolumeGesture =
         GStorage.getSetting<bool>(SettingsKeys.brightnessVolumeGesture);
+    autoSelectSubtitle =
+        GStorage.getSetting<bool>(SettingsKeys.autoSelectSubtitle);
+    subtitleRenderMode =
+        GStorage.getSetting<String>(SettingsKeys.subtitleRenderMode);
+    autoSelectAudioTrack =
+        GStorage.getSetting<String>(SettingsKeys.autoSelectAudioTrack);
 
     playerButtonSkipTime =
         GStorage.getSetting<int>(SettingsKeys.buttonSkipTime);
@@ -213,6 +227,29 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     });
   }
 
+  Future<void> _importFonts() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: const ['ttf', 'otf', 'ttc'],
+      withData: false,
+    );
+    final paths = (result?.files ?? const [])
+        .map((file) => file.path)
+        .whereType<String>()
+        .toList(growable: false);
+    if (paths.isEmpty) {
+      return;
+    }
+    final service = SubtitleFontService();
+    await service.prepare();
+    final count = await service.importFiles(paths);
+    if (!mounted) {
+      return;
+    }
+    KazumiDialog.showToast(message: '已导入 $count 个字体，重新打开视频生效');
+  }
+
   double get playerControllerLayerDisappearSeconds =>
       (playerControllerLayerDisappearTime / Duration.millisecondsPerSecond)
           .clamp(_minPlayerControllerLayerDisappearSeconds,
@@ -299,6 +336,67 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   context.pushNamed('/settings/player/super');
                 },
                 title: Text('超分辨率'),
+              ),
+            ],
+          ),
+          SettingsSection(
+            title: Text('字幕与音轨'),
+            tiles: [
+              SettingsTile.switchTile(
+                leading: Icons.translate_rounded,
+                onToggle: (value) async {
+                  autoSelectSubtitle = value ?? !autoSelectSubtitle;
+                  await GStorage.putSetting<bool>(
+                      SettingsKeys.autoSelectSubtitle, autoSelectSubtitle);
+                  setState(() {});
+                },
+                title: Text('自动选择中文字幕'),
+                description: Text('开播时简体优先，没有简体用繁体，都没有就关闭字幕'),
+                initialValue: autoSelectSubtitle,
+              ),
+              SettingsDropdownTile<String>(
+                leading: Icons.subtitles_rounded,
+                title: const Text('字幕渲染方式'),
+                description: const Text('特效渲染保留 ASS 样式/字体并支持 PGS 图形字幕；简洁文本是兼容兜底'),
+                value: subtitleRenderMode,
+                options: const {
+                  'libass': '特效渲染（推荐）',
+                  'simple': '简洁文本（兼容）',
+                },
+                onChanged: (value) async {
+                  subtitleRenderMode = value;
+                  await GStorage.putSetting<String>(
+                      SettingsKeys.subtitleRenderMode, value);
+                  if (mounted) setState(() {});
+                  KazumiDialog.showToast(message: '重新打开视频后生效');
+                },
+              ),
+              SettingsDropdownTile<String>(
+                leading: Icons.audiotrack_rounded,
+                title: const Text('自动选择音轨'),
+                description: const Text('多音轨时按语言优先挑选；「跟随文件默认」按文件里的 default 标记'),
+                value: autoSelectAudioTrack,
+                options: const {
+                  'auto': '跟随文件默认',
+                  'jpn': '日语优先',
+                  'chi': '中文优先',
+                  'eng': '英语优先',
+                },
+                onChanged: (value) async {
+                  autoSelectAudioTrack = value;
+                  await GStorage.putSetting<String>(
+                      SettingsKeys.autoSelectAudioTrack, value);
+                  if (mounted) setState(() {});
+                  KazumiDialog.showToast(message: '下一集开始生效');
+                },
+              ),
+              SettingsTile(
+                leading: Icons.font_download_rounded,
+                title: const Text('导入字幕字体'),
+                description: const Text(
+                    '支持 .ttf/.otf/.ttc；也可把字体放进 Download/KazumiFonts 自动扫描。'
+                    '服务器字体库会按字幕引用的字体名自动补齐'),
+                onPressed: (_) => _importFonts(),
               ),
             ],
           ),

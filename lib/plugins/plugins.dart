@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:kazumi/modules/roads/road_module.dart';
 import 'package:kazumi/modules/search/plugin_search_module.dart';
 import 'package:kazumi/plugins/anti_crawler_config.dart';
 import 'package:kazumi/plugins/api_rule_config.dart';
 import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:kazumi/services/openlist/openlist_service.dart';
 import 'package:kazumi/services/plugin/api_rule_engine.dart';
 import 'package:kazumi/utils/episode_url.dart';
 import 'package:kazumi/utils/http_headers.dart';
@@ -117,6 +121,43 @@ class Plugin {
           : AntiCrawlerConfig.empty(),
     );
   }
+
+  /// 内置的 WebDAV 片库来源（不走规则引擎，直接读 WebDAV）。
+  factory Plugin.openList() {
+    return Plugin(
+      api: ApiEndpoints.apiLevel.toString(),
+      type: 'anime',
+      name: OpenListService.sourceName,
+      version: '1.0',
+      muliSources: false,
+      useWebview: false,
+      useNativePlayer: true,
+      usePost: false,
+      useLegacyParser: false,
+      adBlocker: false,
+      userAgent: '',
+      baseUrl: OpenListService.instance.baseUrl,
+      searchURL: '',
+      searchList: '',
+      searchName: '',
+      searchResult: '',
+      chapterRoads: '',
+      chapterResult: '',
+      referer: '',
+      searchMode: RuleMode.xpath,
+      chapterMode: RuleMode.xpath,
+      searchApiConfig: ApiSearchConfig(),
+      chapterApiConfig: ApiChapterConfig(),
+      antiCrawlerConfig: AntiCrawlerConfig.empty(),
+    );
+  }
+
+  bool get isOpenListSource =>
+      pluginNameKey(name) == pluginNameKey(OpenListService.sourceName);
+
+  /// 界面上显示的名字（内置 WebDAV 来源显示为「WebDAV」）。
+  String get displayName =>
+      isOpenListSource ? OpenListService.displayName : name;
 
   factory Plugin.fromTemplate() {
     return Plugin(
@@ -236,6 +277,17 @@ class Plugin {
     bool shouldRethrow = false,
     RuleCancelToken? cancelToken,
   }) async {
+    if (isOpenListSource) {
+      try {
+        final items = await OpenListService.instance.search(keyword);
+        return PluginSearchResponse(pluginName: name, data: items);
+      } catch (error) {
+        if (shouldRethrow) {
+          rethrow;
+        }
+        return PluginSearchResponse(pluginName: name, data: <SearchItem>[]);
+      }
+    }
     try {
       return (await traceSearch(keyword, cancelToken: cancelToken)).response;
     } on CaptchaRequiredException {
@@ -252,6 +304,13 @@ class Plugin {
     String source, {
     RuleCancelToken? cancelToken,
   }) async {
+    if (isOpenListSource) {
+      final roads = await OpenListService.instance.chapters(source);
+      if (roads.isEmpty) {
+        throw ChapterErrorException(name);
+      }
+      return roads;
+    }
     return (await traceChapters(source, cancelToken: cancelToken)).roads;
   }
 
@@ -264,6 +323,8 @@ class Plugin {
     return {
       'user-agent': userAgent.isEmpty ? getRandomUA() : userAgent,
       if (referer.isNotEmpty) 'referer': referer,
+      // OpenList 的视频/字幕请求要带 WebDAV 的 Basic Auth。
+      if (isOpenListSource) ...OpenListService.instance.authHeaders,
     };
   }
 }

@@ -1,3 +1,10 @@
+> [!WARNING]
+> **非官方修改版（AI 参与修改）**：本仓库是 [Predidit/Kazumi](https://github.com/Predidit/Kazumi) 的 fork，
+> 增加 WebDAV 片库直连、内封/外挂字幕与多音轨选择、ASS 字体适配等本地播放增强；
+> 与原项目作者无关，也未获得其背书。
+> 基于 2.3.9（commit `184f8db5`），以 GPL-3.0-only 授权，修改详情与已知限制见 [NOTICE.md](NOTICE.md)。
+> 自编译 / 本仓库 Release 的 APK 不包含弹弹play 密钥，弹幕搜索不可用。
+
 <div align=center>
 
 <h1>Kazumi</h1>

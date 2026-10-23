@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
@@ -81,7 +84,7 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
             SettingsDropdownTile<CollectLayout>(
               leading: Icons.view_agenda_rounded,
               title: const Text('追番默认布局'),
-              description: const Text('下次打开追番页时使用，页面内切换不会改变此设置'),
+              description: const Text('下次打开追番页时使用的布局；在追番页内切换布局也会记住并成为默认'),
               enabled: !_savingCollectLayout,
               value: _defaultCollectLayout,
               options: {

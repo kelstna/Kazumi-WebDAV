@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:kazumi/services/player/syncplay_endpoint.dart';
 import 'package:kazumi/utils/device.dart';
 
@@ -571,6 +574,68 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  /// 开播时自动挑中文字幕：简体优先，其次繁体，都没有就关掉字幕。
+  static const autoSelectSubtitle = SettingKey<bool>(
+    'autoSelectSubtitle',
+    true,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕渲染方式：
+  /// * `libass` — mpv/libass 渲染，保留 ASS 特效、字体，支持 PGS 等图形字幕；
+  /// * `simple` — Flutter 文本层渲染，只显示纯文本（兼容兜底）。
+  static const subtitleRenderMode = SettingKey<String>(
+    'subtitleRenderMode',
+    'libass',
+    group: SettingGroup.player,
+  );
+
+  /// 开播时自动选音轨：
+  /// * `auto` — 跟随文件 default 标记（mpv 默认行为）；
+  /// * `jpn` / `chi` / `eng` — 优先对应语言，找不到再跟随默认。
+  static const autoSelectAudioTrack = SettingKey<String>(
+    'autoSelectAudioTrack',
+    'auto',
+    group: SettingGroup.player,
+  );
+
+  /// 选集列表显示「集数」还是「文件名」。
+  static const episodeLabelMode = SettingKey<String>(
+    'episodeLabelMode',
+    'number',
+    group: SettingGroup.player,
+  );
+
+  // 下面这组 key 沿用 openList* 命名（历史数据/已保存配置兼容），
+  // 界面上叫「WebDAV 片库」，任何标准 WebDAV 都能用。
+  static const openListBaseUrl = SettingKey<String>(
+    'openListBaseUrl',
+    '',
+    group: SettingGroup.player,
+  );
+  static const openListRootPath = SettingKey<String>(
+    'openListRootPath',
+    '/dav',
+    group: SettingGroup.player,
+  );
+  static const openListUser = SettingKey<String>(
+    'openListUser',
+    '',
+    group: SettingGroup.player,
+  );
+  static const openListPassword = SettingKey<String>(
+    'openListPassword',
+    '',
+    group: SettingGroup.player,
+  );
+
+  /// OpenList 在「播放来源」里的顺序（规则管理里拖动后保存）。
+  static const openListSourceIndex = SettingKey<int>(
+    'openListSourceIndex',
+    0,
+    group: SettingGroup.player,
+  );
+
   static final List<SettingKey<Object?>> all = [
     hAenable,
     hardwareDecoder,
@@ -676,6 +741,15 @@ class SettingsKeys {
     playerControllerLayerDisappearTime,
     defaultVolume,
     playerMuted,
+    autoSelectSubtitle,
+    subtitleRenderMode,
+    autoSelectAudioTrack,
+    episodeLabelMode,
+    openListBaseUrl,
+    openListRootPath,
+    openListUser,
+    openListPassword,
+    openListSourceIndex,
   ];
 
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {

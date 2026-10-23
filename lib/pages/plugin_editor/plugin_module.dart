@@ -1,9 +1,13 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/pages/plugin_editor/plugin_editor_page.dart';
 import 'package:kazumi/pages/plugin_editor/plugin_shop_page.dart';
 import 'package:kazumi/pages/plugin_editor/plugin_test_page.dart';
 import 'package:kazumi/pages/plugin_editor/plugin_view_page.dart';
 import 'package:kazumi/pages/route_error_page.dart';
+import 'package:kazumi/pages/settings/webdav_settings.dart';
 import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
 
@@ -22,6 +26,10 @@ final pluginModule = createModule(
         child: (context, state) => PluginShopPage(
           controller: inject<PluginsController>(),
         ),
+      )
+      ..route(
+        '/webdav',
+        child: (context, state) => const WebDavSettingsPage(),
       )
       ..route(
         '/test',

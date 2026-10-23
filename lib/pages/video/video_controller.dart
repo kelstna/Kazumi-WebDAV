@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
+// SPDX-License-Identifier: GPL-3.0-only
+
 import 'dart:async';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/modules/roads/road_module.dart';
@@ -464,6 +467,17 @@ abstract class _VideoPageController with Store implements Disposable {
       resolvedEpisode.pageUrl,
     );
 
+    if (looksLikeDirectMediaUrl(urlItem)) {
+      await _playDirectMediaUrl(
+        urlItem,
+        offset,
+        resolvedEpisode: resolvedEpisode,
+        session: session,
+        playerController: playerController,
+      );
+      return;
+    }
+
     await _resolveWithVideoSourceService(
       urlItem,
       offset,
@@ -584,6 +598,57 @@ abstract class _VideoPageController with Store implements Disposable {
     final episode =
         downloadRepository.getEpisode(bangumiId, pluginName, episodeNumber);
     return downloadManager.getLocalVideoPath(episode);
+  }
+
+  /// 直链播放：集数链接本身就是一个媒体文件（本地片库 / anime-server 的
+  /// `/raw/<id>.mkv`）时跳过 WebView 解析，直接把原始文件交给 mpv。
+  ///
+  /// 这条路不经过 WebView，因此 MKV 的内封字幕轨、字体附件都原样保留，
+  /// 播放器可以枚举并切换字幕。
+  Future<void> _playDirectMediaUrl(
+    String url,
+    int offset, {
+    required EpisodeRef resolvedEpisode,
+    required AsyncSession session,
+    required PlayerController playerController,
+  }) async {
+    _finishLoading();
+    KazumiLogger().i('VideoPageController: direct media playback: $url');
+
+    final bool forceAdBlocker =
+        GStorage.getSetting(SettingsKeys.forceAdBlocker);
+
+    final params = PlaybackInitParams(
+      videoUrl: url,
+      offset: offset,
+      isLocalPlayback: false,
+      bangumiId: bangumiItem.id,
+      pluginName: currentPlugin.name,
+      episode: resolvedEpisode.listIndex,
+      danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
+      pageUrl: resolvedEpisode.pageUrl,
+      sortNumber: resolvedEpisode.sortNumber,
+      httpHeaders: currentPlugin.buildHttpHeaders(),
+      adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
+      episodeTitle: resolvedEpisode.displayTitle,
+      referer: currentPlugin.referer,
+      currentRoad: resolvedEpisode.roadIndex,
+      coverUrl: bangumiItem.images['large'],
+      bangumiName: bangumiItem.nameCn.isNotEmpty
+          ? bangumiItem.nameCn
+          : bangumiItem.name,
+    );
+
+    final initialized = await playerController.init(params);
+    if (session.isActive && initialized) {
+      playingEpisode = VideoEpisodeSelection(
+        episode: resolvedEpisode.listIndex,
+        road: resolvedEpisode.roadIndex,
+      );
+      unawaited(_loadPlaybackDanmaku(playerController, params, session));
+    } else if (session.isActive) {
+      _playbackSessions.cancel();
+    }
   }
 
   Future<void> _resolveWithVideoSourceService(
