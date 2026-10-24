@@ -398,6 +398,15 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                     '服务器字体库会按字幕引用的字体名自动补齐'),
                 onPressed: (_) => _importFonts(),
               ),
+              SettingsTile(
+                leading: Icons.cloud_download_rounded,
+                title: const Text('WebDAV 字体库'),
+                description: const Text(
+                    '从 WebDAV 字体目录自动补齐外挂字幕缺的字体；'
+                    '索引由 Kazumi 扫描字体文件生成，缓存上限 200MB'),
+                onPressed: (context) =>
+                    context.pushNamed('/settings/player/fonts'),
+              ),
             ],
           ),
           SettingsSection(

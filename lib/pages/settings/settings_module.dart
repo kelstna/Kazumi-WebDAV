@@ -16,6 +16,7 @@ import 'package:kazumi/pages/settings/proxy/proxy_module.dart';
 import 'package:kazumi/pages/settings/renderer_settings.dart';
 import 'package:kazumi/pages/settings/settings_page.dart';
 import 'package:kazumi/pages/settings/storage_settings.dart';
+import 'package:kazumi/pages/settings/webdav_fonts_settings.dart';
 import 'package:kazumi/pages/settings/super_resolution_settings.dart';
 import 'package:kazumi/pages/settings/sync/bangumi_sync_page.dart';
 import 'package:kazumi/pages/settings/sync/sync_settings_page.dart';
@@ -70,6 +71,10 @@ final settingsModule = createModule(
           ..route(
             '/player/renderer',
             child: (context, state) => const RendererSettings(),
+          )
+          ..route(
+            '/player/fonts',
+            child: (context, state) => const WebDavFontsSettingsPage(),
           )
           ..route(
             '/interface',

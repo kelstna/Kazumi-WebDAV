@@ -119,6 +119,9 @@ class OpenListService {
 
   Uri _uriFor(String path) => Uri.parse('$baseUrl${_encodePath(path)}');
 
+  /// 给字体库等模块用的完整 URI（已带 Basic Auth 由调用方加）。
+  Uri uriFor(String path) => _uriFor(path);
+
   String _encodePath(String path) =>
       path.split('/').map(Uri.encodeComponent).join('/');
 

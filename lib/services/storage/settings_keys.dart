@@ -606,6 +606,13 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  /// WebDAV 字体库目录（相对 WebDAV 根路径，如 `/dav/Fonts`）。
+  static const webdavFontDirectory = SettingKey<String>(
+    'webdavFontDirectory',
+    '/dav/Fonts',
+    group: SettingGroup.player,
+  );
+
   // 下面这组 key 沿用 openList* 命名（历史数据/已保存配置兼容），
   // 界面上叫「WebDAV 片库」，任何标准 WebDAV 都能用。
   static const openListBaseUrl = SettingKey<String>(
@@ -745,6 +752,7 @@ class SettingsKeys {
     subtitleRenderMode,
     autoSelectAudioTrack,
     episodeLabelMode,
+    webdavFontDirectory,
     openListBaseUrl,
     openListRootPath,
     openListUser,

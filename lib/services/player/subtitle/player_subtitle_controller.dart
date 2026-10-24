@@ -10,6 +10,7 @@ import 'package:kazumi/services/openlist/openlist_service.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_entry.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_font_service.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_repository.dart';
+import 'package:kazumi/services/player/subtitle/webdav_font_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
@@ -168,14 +169,22 @@ class PlayerSubtitleController extends ChangeNotifier {
         return;
       }
       final base = _serverBase();
+      var installed = 0;
       if (base != null) {
-        await fontService.ensureFontsFromServer(
+        installed += await fontService.ensureFontsFromServer(
           serverBase: base,
           names: names,
           headers: _headers,
         );
+      } else if (OpenListService.instance.isOpenListUrl(_videoUrl)) {
+        installed += await WebDavFontService.instance.ensureFonts(names);
       }
       if (!identical(_player, player) || _disposed) {
+        return;
+      }
+      if (installed == 0) {
+        // 没有新字体也执行一次 apply，确保 sub-fonts-dir 已经设上。
+        await fontService.applyToPlayer(player);
         return;
       }
       await fontService.applyToPlayer(player);
