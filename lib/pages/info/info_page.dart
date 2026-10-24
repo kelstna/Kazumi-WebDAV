@@ -24,6 +24,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/platform/desktop_window_config.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/device.dart';
+import 'package:kazumi/utils/hero_tags.dart';
 
 class InfoPage extends StatefulWidget {
   const InfoPage({
@@ -469,8 +470,8 @@ class _InfoPageState extends State<InfoPage>
         }),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        // 不要和首页「回到顶部」共用默认 Hero tag，否则返回时会做形变动画。
-        heroTag: null,
+        // 与首页「回到顶部」共用 Hero，返回时做平滑形变。
+        heroTag: kStartWatchingHeroTag,
         tooltip: '开始观看',
         onPressed: _startWatching,
         label: const Text('开始观看'),

@@ -16,6 +16,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/platform/desktop_window_config.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:kazumi/utils/device.dart';
+import 'package:kazumi/utils/hero_tags.dart';
 
 class PopularPage extends StatefulWidget {
   const PopularPage({
@@ -123,22 +124,16 @@ class _PopularPageState extends State<PopularPage> {
               })),
         ],
       ),
-      floatingActionButton: AnimatedScale(
-        scale: _showToTop ? 1 : 0,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-        child: IgnorePointer(
-          ignoring: !_showToTop,
-          child: FloatingActionButton.small(
-            heroTag: null,
-            tooltip: '回到顶部',
-            onPressed: () => scrollController.animateTo(0,
-                duration: const Duration(milliseconds: 350),
-                curve: Curves.easeOut),
-            child: const Icon(Icons.arrow_upward_rounded),
-          ),
-        ),
-      ),
+      floatingActionButton: _showToTop
+          ? FloatingActionButton.small(
+              heroTag: kStartWatchingHeroTag,
+              tooltip: '回到顶部',
+              onPressed: () => scrollController.animateTo(0,
+                  duration: const Duration(milliseconds: 350),
+                  curve: Curves.easeOut),
+              child: const Icon(Icons.arrow_upward_rounded),
+            )
+          : null,
     );
   }
 
