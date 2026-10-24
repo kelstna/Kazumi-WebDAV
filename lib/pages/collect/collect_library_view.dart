@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import 'package:flutter/material.dart';
+import 'package:kazumi/utils/hero_tags.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart';
@@ -82,6 +83,7 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
     if (show != _showToTop && mounted) {
       setState(() => _showToTop = show);
     }
+    updateStartWatchingHero(kCollectBackToTopHero, show);
     return false;
   }
 
@@ -110,6 +112,7 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
 
   @override
   void dispose() {
+    updateStartWatchingHero(kCollectBackToTopHero, false);
     _tabController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -229,35 +232,27 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
                   ),
                 ),
               ),
-              Positioned(
-                right: 16,
-                bottom: 16 + MediaQuery.paddingOf(context).bottom,
-                child: AnimatedScale(
-                  scale: _showToTop ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  child: IgnorePointer(
-                    ignoring: !_showToTop,
-                    child: FloatingActionButton.small(
-                      heroTag: null,
-                      tooltip: '回到顶部',
-                      onPressed: () {
-                        final position = _activePosition;
-                        if (position == null ||
-                            !position.hasContentDimensions) {
-                          return;
-                        }
-                        position.animateTo(
-                          0,
-                          duration: const Duration(milliseconds: 350),
-                          curve: Curves.easeOut,
-                        );
-                      },
-                      child: const Icon(Icons.arrow_upward_rounded),
-                    ),
+              if (_showToTop)
+                Positioned(
+                  right: 16,
+                  bottom: 16 + MediaQuery.paddingOf(context).bottom,
+                  child: FloatingActionButton.small(
+                    heroTag: kCollectBackToTopHero,
+                    tooltip: '回到顶部',
+                    onPressed: () {
+                      final position = _activePosition;
+                      if (position == null || !position.hasContentDimensions) {
+                        return;
+                      }
+                      position.animateTo(
+                        0,
+                        duration: const Duration(milliseconds: 350),
+                        curve: Curves.easeOut,
+                      );
+                    },
+                    child: const Icon(Icons.arrow_upward_rounded),
                   ),
                 ),
-              ),
             ],
           );
         }),

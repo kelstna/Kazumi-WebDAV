@@ -470,8 +470,8 @@ class _InfoPageState extends State<InfoPage>
         }),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        // 与首页「回到顶部」共用 Hero，返回时做平滑形变。
-        heroTag: kStartWatchingHeroTag,
+        // 动态匹配来源页的「回到顶部」FAB，保留形变动画；没有可见按钮时不启用 Hero。
+        heroTag: activeStartWatchingHeroTag.value,
         tooltip: '开始观看',
         onPressed: _startWatching,
         label: const Text('开始观看'),

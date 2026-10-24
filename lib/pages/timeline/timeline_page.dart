@@ -17,6 +17,7 @@ import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/timeline/timeline_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/anime_season.dart';
+import 'package:kazumi/utils/hero_tags.dart';
 
 part 'timeline_options.dart';
 part 'timeline_week_selector.dart';
@@ -179,32 +180,26 @@ class _TimelinePageState extends State<TimelinePage> {
           ),
         );
         return Scaffold(
-          floatingActionButton: AnimatedScale(
-            scale: _showToTop ? 1 : 0,
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            child: IgnorePointer(
-              ignoring: !_showToTop,
-              child: FloatingActionButton.small(
-                heroTag: null,
-                tooltip: '回到顶部',
-                onPressed: () {
-                  final position = _innerPosition;
-                  if (position == null ||
-                      !position.hasContentDimensions ||
-                      !position.hasPixels) {
-                    return;
-                  }
-                  position.animateTo(
-                    0,
-                    duration: const Duration(milliseconds: 350),
-                    curve: Curves.easeOut,
-                  );
-                },
-                child: const Icon(Icons.arrow_upward_rounded),
-              ),
-            ),
-          ),
+          floatingActionButton: _showToTop
+              ? FloatingActionButton.small(
+                  heroTag: kTimelineBackToTopHero,
+                  tooltip: '回到顶部',
+                  onPressed: () {
+                    final position = _innerPosition;
+                    if (position == null ||
+                        !position.hasContentDimensions ||
+                        !position.hasPixels) {
+                      return;
+                    }
+                    position.animateTo(
+                      0,
+                      duration: const Duration(milliseconds: 350),
+                      curve: Curves.easeOut,
+                    );
+                  },
+                  child: const Icon(Icons.arrow_upward_rounded),
+                )
+              : null,
           body: SafeArea(
             top: true,
             child: NotificationListener<ScrollNotification>(
@@ -222,6 +217,7 @@ class _TimelinePageState extends State<TimelinePage> {
                   if (show != _showToTop && mounted) {
                     setState(() => _showToTop = show);
                   }
+                  updateStartWatchingHero(kTimelineBackToTopHero, show);
                 }
                 return false;
               },
