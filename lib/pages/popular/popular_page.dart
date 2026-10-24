@@ -49,7 +49,6 @@ class _PopularPageState extends State<PopularPage> {
 
   @override
   void dispose() {
-    updateStartWatchingHero(kPopularBackToTopHero, false);
     scrollController.removeListener(scrollListener);
     scrollController.dispose();
     super.dispose();
@@ -61,7 +60,6 @@ class _PopularPageState extends State<PopularPage> {
     if (show != _showToTop && mounted) {
       setState(() => _showToTop = show);
     }
-    updateStartWatchingHero(kPopularBackToTopHero, show);
     if (scrollController.position.pixels >=
             scrollController.position.maxScrollExtent - 200 &&
         !popularController.isLoadingMore) {
@@ -126,16 +124,12 @@ class _PopularPageState extends State<PopularPage> {
               })),
         ],
       ),
-      floatingActionButton: _showToTop
-          ? FloatingActionButton.small(
-              heroTag: kPopularBackToTopHero,
-              tooltip: '回到顶部',
-              onPressed: () => scrollController.animateTo(0,
-                  duration: const Duration(milliseconds: 350),
-                  curve: Curves.easeOut),
-              child: const Icon(Icons.arrow_upward_rounded),
-            )
-          : null,
+      floatingActionButton: BackToTopHeroFab(
+        visible: _showToTop,
+        onPressed: () => scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOut),
+      ),
     );
   }
 

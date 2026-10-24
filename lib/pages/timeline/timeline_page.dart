@@ -180,26 +180,22 @@ class _TimelinePageState extends State<TimelinePage> {
           ),
         );
         return Scaffold(
-          floatingActionButton: _showToTop
-              ? FloatingActionButton.small(
-                  heroTag: kTimelineBackToTopHero,
-                  tooltip: '回到顶部',
-                  onPressed: () {
-                    final position = _innerPosition;
-                    if (position == null ||
-                        !position.hasContentDimensions ||
-                        !position.hasPixels) {
-                      return;
-                    }
-                    position.animateTo(
-                      0,
-                      duration: const Duration(milliseconds: 350),
-                      curve: Curves.easeOut,
-                    );
-                  },
-                  child: const Icon(Icons.arrow_upward_rounded),
-                )
-              : null,
+          floatingActionButton: BackToTopHeroFab(
+            visible: _showToTop,
+            onPressed: () {
+              final position = _innerPosition;
+              if (position == null ||
+                  !position.hasContentDimensions ||
+                  !position.hasPixels) {
+                return;
+              }
+              position.animateTo(
+                0,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeOut,
+              );
+            },
+          ),
           body: SafeArea(
             top: true,
             child: NotificationListener<ScrollNotification>(
@@ -217,7 +213,6 @@ class _TimelinePageState extends State<TimelinePage> {
                   if (show != _showToTop && mounted) {
                     setState(() => _showToTop = show);
                   }
-                  updateStartWatchingHero(kTimelineBackToTopHero, show);
                 }
                 return false;
               },

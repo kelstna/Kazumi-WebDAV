@@ -469,13 +469,15 @@ class _InfoPageState extends State<InfoPage>
           );
         }),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        // 动态匹配来源页的「回到顶部」FAB，保留形变动画；没有可见按钮时不启用 Hero。
-        heroTag: activeStartWatchingHeroTag.value,
-        tooltip: '开始观看',
-        onPressed: _startWatching,
-        label: const Text('开始观看'),
-        icon: const Icon(Icons.play_arrow_rounded),
+      floatingActionButton: StartWatchingHero(
+        tag: kBackToTopHeroTag,
+        child: FloatingActionButton.extended(
+          heroTag: null,
+          tooltip: '开始观看',
+          onPressed: _startWatching,
+          label: const Text('开始观看'),
+          icon: const Icon(Icons.play_arrow_rounded),
+        ),
       ),
     );
   }
