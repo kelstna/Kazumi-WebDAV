@@ -176,7 +176,8 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
         children: [
           Text(
             'Kazumi 会扫描这个 WebDAV 目录里的 .ttf/.otf/.ttc，读取字体名建立本地索引；'
-            '播放外挂 ASS 时缺哪个字体就下载哪个，不需要在 WebDAV 上放索引文件。',
+            '播放外挂 ASS 时按「手动导入 → Download/KazumiFonts → WebDAV」的顺序找字体，'
+            '都没有才下载。WebDAV 上不需要放索引文件。',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -260,8 +261,9 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '缓存只统计自动下载的字体；手动导入和 Download/KazumiFonts 里的字体不会被清理。'
-            '超过 200MB 时按最久未使用自动淘汰。',
+            '缓存统计 App 字体目录里的字体（手动导入 + 自动下载）；Download/KazumiFonts '
+            '直接以软链接使用，不复制、不计入缓存。超过 200MB 时自动淘汰最早下载的字体，'
+            '手动导入的字体不会被清理。',
             style: theme.textTheme.bodySmall,
           ),
         ],

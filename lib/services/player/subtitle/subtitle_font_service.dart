@@ -112,9 +112,12 @@ class SubtitleFontService {
   }
 
   /// 扫描 `Download/KazumiFonts`（无权限时静默跳过）。
+  ///
+  /// 优先用软链接把文件挂进 `sub-fonts-dir`，这样不复制字体、不占 App 缓存；
+  /// 文件系统不支持软链接时再退回复制。
   Future<int> scanDeviceFolder() async {
     final dir = await directory();
-    var copied = 0;
+    var linked = 0;
     for (final folder in _deviceFolders) {
       final source = Directory(folder);
       try {
@@ -128,18 +131,37 @@ class SubtitleFontService {
           if (!_fontExtensions.contains(p.extension(entity.path).toLowerCase())) {
             continue;
           }
-          if (await _copyIfMissing(entity, dir)) {
-            copied++;
+          if (await _linkOrCopy(entity, dir)) {
+            linked++;
           }
         }
       } catch (_) {
         // 没有存储权限时会抛异常，跳过即可。
       }
     }
-    if (copied > 0) {
-      KazumiLogger().i('SubtitleFontService: copied $copied fonts from device');
+    if (linked > 0) {
+      KazumiLogger().i('SubtitleFontService: linked $linked fonts from device');
     }
-    return copied;
+    return linked;
+  }
+
+  Future<bool> _linkOrCopy(File source, Directory dir) async {
+    final name = p.basename(source.path);
+    final targetPath = p.join(dir.path, name);
+    if (await File(targetPath).exists() || await Link(targetPath).exists()) {
+      return false;
+    }
+    try {
+      await Link(targetPath).create(source.path);
+      return true;
+    } catch (_) {
+      try {
+        await source.copy(targetPath);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
   }
 
   /// 手动导入字体文件（多选）。

@@ -144,6 +144,7 @@ class PlayerSubtitleController extends ChangeNotifier {
   Future<void> _prepareFonts(Player player) async {
     try {
       await fontService.prepare();
+      WebDavFontService.instance.invalidateLocalIndex();
       if (!identical(_player, player) || _disposed) {
         return;
       }

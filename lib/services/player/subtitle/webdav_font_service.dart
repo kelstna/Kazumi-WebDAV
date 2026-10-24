@@ -78,6 +78,7 @@ class WebDavFontService {
   static const Set<String> _fontExtensions = {'.ttf', '.otf', '.ttc'};
 
   Directory? _root;
+  Map<String, WebDavFontFace>? _localIndex;
 
   Future<Directory> _baseDir() async {
     final existing = _root;
@@ -269,6 +270,7 @@ class WebDavFontService {
     final manifest = await _readMap(_manifestFile(dir));
     final cache = await _readCache(dir);
     final fontDir = await SubtitleFontService().directory();
+    final local = await _ensureLocalIndex();
 
     final keys = names.map(_normalize).where((key) => key.isNotEmpty).toSet();
     final missing = <String>{};
@@ -282,6 +284,10 @@ class WebDavFontService {
         continue;
       }
       manifest.remove(key);
+      // 手动导入 / Download/KazumiFonts 的字体优先，本地命中就不再下载。
+      if (local.containsKey(key)) {
+        continue;
+      }
       missing.add(key);
     }
 
@@ -341,32 +347,157 @@ class WebDavFontService {
       await _writeMap(_manifestFile(dir), manifest);
       await _evict(dir, cache, fontDir);
       await _writeCache(dir, cache);
+      _localIndex = null;
       KazumiLogger().i('WebDavFontService: installed $installed fonts');
     }
     return installed;
   }
 
+  /// 字体目录变化（导入/链接新字体）后清掉内存索引。
+  void invalidateLocalIndex() {
+    _localIndex = null;
+  }
+
+  /// 本地已有字体（手动导入 / Download 链接 / 已下载）的索引。
+  ///
+  /// 优先级：手动导入 > Download/KazumiFonts 链接 > WebDAV 缓存。
+  Future<Map<String, WebDavFontFace>> _ensureLocalIndex() async {
+    final existing = _localIndex;
+    if (existing != null) {
+      return existing;
+    }
+    final dir = await SubtitleFontService().directory();
+    final base = await _baseDir();
+    final cacheFile = File(p.join(base.path, 'local_index.json'));
+    final cached = await _readMap(cacheFile);
+    final webdavFiles = (await _readCache(base)).keys.toSet();
+    final result = <String, WebDavFontFace>{};
+    final priorities = <String, int>{};
+    final fresh = <String, dynamic>{};
+
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is Directory) {
+          continue;
+        }
+        final name = p.basename(entity.path);
+        final extension = p.extension(name).toLowerCase();
+        if (!_fontExtensions.contains(extension) ||
+            name == 'MiSans-Regular.ttf') {
+          continue;
+        }
+        final isLink = entity is Link;
+        final file = File(entity.path);
+        FileStat stat;
+        try {
+          stat = await file.stat();
+        } catch (_) {
+          continue;
+        }
+        if (stat.type != FileSystemEntityType.file) {
+          continue;
+        }
+        final stamp = '${stat.modified.millisecondsSinceEpoch}:${stat.size}';
+        Map<String, dynamic> row;
+        final old = cached[name];
+        if (old is Map && old['stamp'] == stamp) {
+          row = Map<String, dynamic>.from(old);
+        } else {
+          final names = await _readLocalFontNames(entity.path);
+          final aliases = <String>{
+            ...names,
+            p.basenameWithoutExtension(name),
+          }.where((value) => value.trim().isNotEmpty).toList(growable: false);
+          row = {
+            'stamp': stamp,
+            'size': stat.size,
+            'family': aliases.isEmpty
+                ? p.basenameWithoutExtension(name)
+                : aliases.first,
+            'aliases': aliases,
+            'link': isLink,
+          };
+        }
+        fresh[name] = row;
+        if (row['link'] is! bool) {
+          row['link'] = isLink;
+        }
+        final face = WebDavFontFace(
+          file: name,
+          size: (row['size'] as num?)?.toInt() ?? stat.size,
+          family: row['family'] as String? ?? name,
+          aliases: (row['aliases'] as List?)?.cast<String>() ?? const [],
+        );
+        final source = isLink
+            ? 'external'
+            : (webdavFiles.contains(name) ? 'webdav' : 'manual');
+        final priority = source == 'manual' ? 0 : (source == 'external' ? 1 : 2);
+        for (final alias in face.aliases) {
+          final key = _normalize(alias);
+          if (key.isEmpty) {
+            continue;
+          }
+          final current = priorities[key];
+          if (current == null || priority < current) {
+            priorities[key] = priority;
+            result[key] = face;
+          }
+        }
+      }
+    } catch (error) {
+      KazumiLogger()
+          .w('WebDavFontService: failed to scan local fonts', error: error);
+    }
+
+    _localIndex = result;
+    await _writeMap(cacheFile, fresh);
+    return result;
+  }
+
+  /// App 字体目录的总占用：手动导入 + 自动下载都算；软链接不计。
   Future<int> cacheBytes() async {
-    final dir = await _baseDir();
-    final cache = await _readCache(dir);
-    final fontDir = await SubtitleFontService().directory();
+    final dir = await SubtitleFontService().directory();
     var total = 0;
-    for (final file in cache.keys) {
-      try {
-        final stat = await File(p.join(fontDir.path, file)).stat();
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is Directory || entity is Link) {
+          continue;
+        }
+        final name = p.basename(entity.path);
+        if (!_fontExtensions.contains(p.extension(name).toLowerCase()) ||
+            name == 'MiSans-Regular.ttf') {
+          continue;
+        }
+        final stat = await File(entity.path).stat();
         if (stat.type == FileSystemEntityType.file) {
           total += stat.size;
         }
-      } catch (_) {
-        // 文件被删了就忽略。
       }
+    } catch (_) {
+      // 目录不可读时按 0 处理。
     }
     return total;
   }
 
+  /// App 字体目录里的字体数量（不含软链接）。
   Future<int> cacheCount() async {
-    final dir = await _baseDir();
-    return (await _readCache(dir)).length;
+    final dir = await SubtitleFontService().directory();
+    var count = 0;
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is Directory || entity is Link) {
+          continue;
+        }
+        final name = p.basename(entity.path);
+        if (name != 'MiSans-Regular.ttf' &&
+            _fontExtensions.contains(p.extension(name).toLowerCase())) {
+          count++;
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+    return count;
   }
 
   Future<void> clearCache() async {
@@ -387,6 +518,7 @@ class WebDavFontService {
     manifest.removeWhere((_, file) => cache.containsKey(file));
     await _writeMap(_manifestFile(dir), manifest);
     await _writeCache(dir, {});
+    _localIndex = null;
   }
 
   Future<void> _evict(
@@ -507,7 +639,6 @@ class WebDavFontService {
 
   Future<List<String>> _readFontNames(String path) async {
     final client = http.Client();
-    StreamIterator<List<int>>? iterator;
     try {
       final request = http.Request('GET', OpenListService.instance.uriFor(path));
       request.headers.addAll(OpenListService.instance.authHeaders);
@@ -517,8 +648,33 @@ class WebDavFontService {
       if (response.statusCode != 200) {
         return const [];
       }
-      iterator = StreamIterator<List<int>>(response.stream);
-      final reader = _FontReader(iterator);
+      return await _readNamesFromStream(response.stream, path);
+    } catch (error) {
+      KazumiLogger()
+          .w('WebDavFontService: failed to read names of $path', error: error);
+      return const [];
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<List<String>> _readLocalFontNames(String path) async {
+    try {
+      return await _readNamesFromStream(File(path).openRead(), path);
+    } catch (error) {
+      KazumiLogger().w(
+        'WebDavFontService: failed to read local font $path',
+        error: error,
+      );
+      return const [];
+    }
+  }
+
+  Future<List<String>> _readNamesFromStream(
+      Stream<List<int>> stream, String label) async {
+    final iterator = StreamIterator<List<int>>(stream);
+    final reader = _FontReader(iterator);
+    try {
       if (!await reader.ensure(12)) {
         return const [];
       }
@@ -530,19 +686,15 @@ class WebDavFontService {
           return const [];
         }
         for (var i = 0; i < count; i++) {
-          names.addAll(await _readFaceNames(reader, _u32(reader.bytes, 12 + 4 * i)));
+          names
+              .addAll(await _readFaceNames(reader, _u32(reader.bytes, 12 + 4 * i)));
         }
       } else {
         names.addAll(await _readFaceNames(reader, 0));
       }
       return names.toSet().toList(growable: false);
-    } catch (error) {
-      KazumiLogger()
-          .w('WebDavFontService: failed to read names of $path', error: error);
-      return const [];
     } finally {
-      await iterator?.cancel();
-      client.close();
+      await iterator.cancel();
     }
   }
 
