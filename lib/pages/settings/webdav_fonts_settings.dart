@@ -51,7 +51,7 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
       return;
     }
     setState(() {
-      _index = index.directory == service.fontDirectory
+      _index = index.directory == service.normalizedDirectory
           ? index
           : WebDavFontIndex.empty;
       _cacheBytes = bytes;
@@ -60,7 +60,7 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
   }
 
   Future<void> _saveAndBuild() async {
-    final directory = _directory.text.trim();
+    final directory = WebDavFontService.normalizeDirectory(_directory.text);
     if (directory.isEmpty) {
       KazumiDialog.showToast(message: '请填写 WebDAV 字体目录');
       return;
@@ -175,7 +175,7 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
             decoration: const InputDecoration(
               labelText: '字体目录（WebDAV 路径）',
               hintText: '/dav/Fonts',
-              helperText: '字体文件直接放在这个目录里，支持子目录外的平铺文件',
+              helperText: '会递归扫描子目录里的字体文件',
               border: OutlineInputBorder(),
             ),
           ),

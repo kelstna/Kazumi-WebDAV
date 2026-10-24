@@ -96,6 +96,11 @@ class WebDavFontService {
   String get fontDirectory =>
       GStorage.getSetting<String>(SettingsKeys.webdavFontDirectory).trim();
 
+  /// 去掉尾部斜杠、补齐开头的路径形式。
+  static String normalizeDirectory(String value) => _normalizeDirectory(value);
+
+  String get normalizedDirectory => _normalizeDirectory(fontDirectory);
+
   bool get isConfigured =>
       fontDirectory.isNotEmpty && OpenListService.instance.baseUrl.isNotEmpty;
 
@@ -139,17 +144,11 @@ class WebDavFontService {
   Future<int> buildIndex({
     void Function(int done, int total)? onProgress,
   }) async {
-    final directory = fontDirectory;
+    final directory = normalizedDirectory;
     if (directory.isEmpty) {
       throw OpenListException('未设置 WebDAV 字体目录');
     }
-    final entries = await OpenListService.instance.list(directory);
-    final files = entries
-        .where((entry) =>
-            !entry.isDir &&
-            _fontExtensions.contains(p.extension(entry.name).toLowerCase()))
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final files = await _collectFontEntries(directory);
     if (files.isEmpty) {
       throw OpenListException('字体目录里没有 .ttf/.otf/.ttc 文件');
     }
@@ -197,6 +196,60 @@ class WebDavFontService {
     return faces.length;
   }
 
+  /// 字体包经常按类型分子目录，这里做有限深度的递归扫描。
+  Future<List<OpenListEntry>> _collectFontEntries(String root) async {
+    final files = <OpenListEntry>[];
+    final queue = <String>[root];
+    final scanned = <String>{};
+    var directories = 0;
+    while (queue.isNotEmpty && files.length < 3000) {
+      final directory = queue.removeAt(0);
+      if (!scanned.add(directory)) {
+        continue;
+      }
+      directories++;
+      if (directories > 120) {
+        break;
+      }
+      List<OpenListEntry> entries;
+      try {
+        entries = await OpenListService.instance.list(directory);
+      } catch (error) {
+        KazumiLogger().w(
+          'WebDavFontService: failed to list $directory',
+          error: error,
+        );
+        continue;
+      }
+      for (final entry in entries) {
+        if (entry.isDir) {
+          if (queue.length < 300) {
+            queue.add(entry.path);
+          }
+        } else if (_fontExtensions
+            .contains(p.extension(entry.name).toLowerCase())) {
+          files.add(entry);
+        }
+      }
+    }
+    files.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return files;
+  }
+
+  static String _normalizeDirectory(String value) {
+    var path = value.trim();
+    if (path.isEmpty) {
+      return '';
+    }
+    if (!path.startsWith('/')) {
+      path = '/$path';
+    }
+    while (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    return path;
+  }
+
   /// 给外挂字幕里出现的字体名补字体，返回本次新装数量。
   Future<int> ensureFonts(
     Set<String> names, {
@@ -206,7 +259,7 @@ class WebDavFontService {
       return 0;
     }
     final index = await loadIndex();
-    if (index.faces.isEmpty || index.directory != fontDirectory) {
+    if (index.faces.isEmpty || index.directory != normalizedDirectory) {
       return 0;
     }
     final dir = await _baseDir();
@@ -381,7 +434,7 @@ class WebDavFontService {
   Future<bool> _downloadFont(WebDavFontFace face, String fontDir) async {
     try {
       final response = await http
-          .get(OpenListService.instance.uriFor('$fontDirectory/${face.file}'),
+          .get(OpenListService.instance.uriFor('$normalizedDirectory/${face.file}'),
               headers: OpenListService.instance.authHeaders)
           .timeout(const Duration(seconds: 60));
       if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
