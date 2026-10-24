@@ -130,6 +130,7 @@ class _PopularPageState extends State<PopularPage> {
         child: IgnorePointer(
           ignoring: !_showToTop,
           child: FloatingActionButton.small(
+            heroTag: null,
             tooltip: '回到顶部',
             onPressed: () => scrollController.animateTo(0,
                 duration: const Duration(milliseconds: 350),

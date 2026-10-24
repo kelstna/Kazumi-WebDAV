@@ -239,6 +239,7 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
                   child: IgnorePointer(
                     ignoring: !_showToTop,
                     child: FloatingActionButton.small(
+                      heroTag: null,
                       tooltip: '回到顶部',
                       onPressed: () {
                         final position = _activePosition;

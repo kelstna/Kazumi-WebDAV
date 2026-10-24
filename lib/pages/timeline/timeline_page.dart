@@ -186,6 +186,7 @@ class _TimelinePageState extends State<TimelinePage> {
             child: IgnorePointer(
               ignoring: !_showToTop,
               child: FloatingActionButton.small(
+                heroTag: null,
                 tooltip: '回到顶部',
                 onPressed: () {
                   final position = _innerPosition;

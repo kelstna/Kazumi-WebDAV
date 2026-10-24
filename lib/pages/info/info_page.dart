@@ -469,6 +469,8 @@ class _InfoPageState extends State<InfoPage>
         }),
       ),
       floatingActionButton: FloatingActionButton.extended(
+        // 不要和首页「回到顶部」共用默认 Hero tag，否则返回时会做形变动画。
+        heroTag: null,
         tooltip: '开始观看',
         onPressed: _startWatching,
         label: const Text('开始观看'),
