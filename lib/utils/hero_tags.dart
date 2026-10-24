@@ -34,7 +34,14 @@ class StartWatchingHero extends StatelessWidget {
           fromHeroContext, toHeroContext) {
         final from = (fromHeroContext.widget as Hero).child;
         final to = (toHeroContext.widget as Hero).child;
-        return direction == HeroFlightDirection.push ? to : from;
+        // push/pop 都显示「开始观看」按钮本身，并整体等比缩放，
+        // 这样文字和三角图标会和按钮一起变小/变大，而不是只缩放背景。
+        final button = direction == HeroFlightDirection.push ? to : from;
+        return FittedBox(
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          child: button,
+        );
       },
       child: child,
     );
