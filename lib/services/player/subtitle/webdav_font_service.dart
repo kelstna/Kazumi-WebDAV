@@ -143,12 +143,13 @@ class WebDavFontService {
   /// [onProgress] 的第一个参数是已处理数量，第二个是总数。
   Future<int> buildIndex({
     void Function(int done, int total)? onProgress,
+    void Function(int directories, int files)? onListing,
   }) async {
     final directory = normalizedDirectory;
     if (directory.isEmpty) {
       throw OpenListException('未设置 WebDAV 字体目录');
     }
-    final files = await _collectFontEntries(directory);
+    final files = await _collectFontEntries(directory, onListing: onListing);
     if (files.isEmpty) {
       throw OpenListException('字体目录里没有 .ttf/.otf/.ttc 文件');
     }
@@ -197,7 +198,8 @@ class WebDavFontService {
   }
 
   /// 字体包经常按类型分子目录，这里做有限深度的递归扫描。
-  Future<List<OpenListEntry>> _collectFontEntries(String root) async {
+  Future<List<OpenListEntry>> _collectFontEntries(String root,
+      {void Function(int directories, int files)? onListing}) async {
     final files = <OpenListEntry>[];
     final queue = <String>[root];
     final scanned = <String>{};
@@ -221,6 +223,7 @@ class WebDavFontService {
         );
         continue;
       }
+      onListing?.call(directories, files.length);
       for (final entry in entries) {
         if (entry.isDir) {
           if (queue.length < 300) {

@@ -26,6 +26,8 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
   bool _busy = false;
   int _progressDone = 0;
   int _progressTotal = 0;
+  int _listingDirs = 0;
+  int _listingFiles = 0;
 
   @override
   void initState() {
@@ -78,9 +80,20 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
       _busy = true;
       _progressDone = 0;
       _progressTotal = 0;
+      _listingDirs = 0;
+      _listingFiles = 0;
     });
     try {
       final count = await WebDavFontService.instance.buildIndex(
+        onListing: (directories, files) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _listingDirs = directories;
+            _listingFiles = files;
+          });
+        },
         onProgress: (done, total) {
           if (!mounted) {
             return;
@@ -202,7 +215,7 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
             Text(
               _progressTotal > 0
                   ? '正在读取字体信息 $_progressDone / $_progressTotal'
-                  : '正在列出字体目录…',
+                  : '正在扫描目录… 已扫描 $_listingDirs 个目录 / $_listingFiles 个字体',
               style: theme.textTheme.bodySmall,
             ),
           ],
