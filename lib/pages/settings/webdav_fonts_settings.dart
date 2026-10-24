@@ -119,6 +119,16 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
     }
   }
 
+  void _showIndexPreview() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => _FontIndexPreview(faces: _index.faces),
+    );
+  }
+
   Future<void> _clearCache() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -228,6 +238,10 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
                   ? '还没有索引'
                   : '${_index.faces.length} 个字体'
                       '${builtAt == null ? '' : ' · ${builtAt.toString().substring(0, 16)}'}'),
+              trailing: _index.faces.isEmpty
+                  ? null
+                  : const Icon(Icons.chevron_right_rounded),
+              onTap: _index.faces.isEmpty ? null : _showIndexPreview,
             ),
           ),
           Card(
@@ -251,6 +265,131 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
             style: theme.textTheme.bodySmall,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 字体索引预览：搜索 family / 文件名 / 别名。
+class _FontIndexPreview extends StatefulWidget {
+  const _FontIndexPreview({required this.faces});
+
+  final List<WebDavFontFace> faces;
+
+  @override
+  State<_FontIndexPreview> createState() => _FontIndexPreviewState();
+}
+
+class _FontIndexPreviewState extends State<_FontIndexPreview> {
+  String _query = '';
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    }
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+
+  List<WebDavFontFace> get _filtered {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) {
+      return widget.faces;
+    }
+    return widget.faces
+        .where((face) =>
+            face.family.toLowerCase().contains(query) ||
+            face.file.toLowerCase().contains(query) ||
+            face.aliases.any((alias) => alias.toLowerCase().contains(query)))
+        .toList(growable: false);
+  }
+
+  void _showDetail(WebDavFontFace face) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(face.family),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('文件：${face.file}'),
+              const SizedBox(height: 4),
+              Text('大小：${_formatBytes(face.size)}'),
+              const SizedBox(height: 12),
+              const Text('别名（字幕里可能用的名字）：'),
+              const SizedBox(height: 4),
+              for (final alias in face.aliases) Text('· $alias'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final filtered = _filtered;
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.82,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Row(
+                children: [
+                  Text('字体索引', style: theme.textTheme.titleLarge),
+                  const Spacer(),
+                  Text(
+                    '${widget.faces.length} 个',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search_rounded),
+                  hintText: '搜索字体名 / 文件名 / 别名',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: (value) => setState(() => _query = value),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: filtered.isEmpty
+                  ? const Center(child: Text('没有匹配的字体'))
+                  : ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final face = filtered[index];
+                        return ListTile(
+                          title: Text(face.family),
+                          subtitle: Text(
+                            '${face.file} · ${_formatBytes(face.size)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => _showDetail(face),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
