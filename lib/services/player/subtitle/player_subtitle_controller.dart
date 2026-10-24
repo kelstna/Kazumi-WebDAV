@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:kazumi/services/logging/logger.dart';
@@ -19,7 +20,7 @@ import 'package:path/path.dart' as p;
 /// 1. 从 media_kit（mpv）拿到内封字幕轨道列表；
 /// 2. 发现外挂字幕（本地同目录 / anime-server 侧）；
 /// 3. 把用户选择写回播放器（`sid` / `sub-add`）、字幕延迟，以及开播时
-///    「简体 → 繁体 → 关闭」的自动选择。
+///    「简体 → 繁体 → 默认字幕」的自动选择。
 class PlayerSubtitleController extends ChangeNotifier {
   PlayerSubtitleController({SubtitleRepository? repository})
       : _repository = repository ?? SubtitleRepository();
@@ -277,30 +278,73 @@ class PlayerSubtitleController extends ChangeNotifier {
           'PlayerSubtitleController: auto-selected subtitle "${pick.title}"');
       return;
     }
-    // 没匹配到中文：唯一轨道就用它，否则保持播放器默认（通常是 default 轨）。
+    // 没匹配到中文：唯一轨道就用它；否则退回「文件默认字幕」（mpv 的
+    // default 标记，没有标记时用第一条字幕轨），不会把字幕关掉。
     if (allEntries.length == 1) {
       unawaited(_applySelection(allEntries.first));
     } else {
-      _syncFromCurrentTrack();
-      _notify();
+      unawaited(_applyDefaultWhenNoChinese());
     }
   }
 
-  void _syncFromCurrentTrack() {
+  Future<void> _applyDefaultWhenNoChinese() async {
+    final entry = await _pickDefaultEntry();
+    if (entry == null || _userChosen || _disposed) {
+      return;
+    }
+    await _applySelection(entry);
+    KazumiLogger().i(
+        'PlayerSubtitleController: auto-selected default subtitle "${entry.title}"');
+  }
+
+  /// 找到「默认字幕」：优先 mpv `track-list` 里 `default=yes` 的字幕轨，
+  /// 其次第一条字幕轨、第一条内封轨，最后第一条外挂。
+  Future<SubtitleEntry?> _pickDefaultEntry() async {
     final player = _player;
-    if (player == null) {
-      return;
-    }
-    final id = player.state.track.subtitle.id;
-    if (id == 'auto' || id == 'no') {
-      return;
-    }
-    for (final entry in allEntries) {
-      if (entry.id == id) {
-        _selected = entry;
-        return;
+    if (player != null) {
+      try {
+        final platform = player.platform;
+        if (platform is NativePlayer) {
+          final raw = await platform.getProperty('track-list');
+          if (raw.isNotEmpty) {
+            final decoded = jsonDecode(raw);
+            if (decoded is List) {
+              final subtitles = decoded
+                  .whereType<Map>()
+                  .where((track) => track['type'] == 'sub')
+                  .toList(growable: false);
+              if (subtitles.isNotEmpty) {
+                Map? target;
+                for (final track in subtitles) {
+                  if (track['default'] == true) {
+                    target = track;
+                    break;
+                  }
+                }
+                target ??= subtitles.first;
+                final id = target['id']?.toString();
+                for (final entry in allEntries) {
+                  if (entry.isEmbedded && entry.id == id) {
+                    return entry;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        KazumiLogger().w(
+          'PlayerSubtitleController: failed to read mpv track-list',
+          error: error,
+        );
       }
     }
+    for (final entry in allEntries) {
+      if (entry.isEmbedded) {
+        return entry;
+      }
+    }
+    return allEntries.isEmpty ? null : allEntries.first;
   }
 
   SubtitleEntry? _pickPreferredEntry() {

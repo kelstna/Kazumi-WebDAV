@@ -351,7 +351,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   setState(() {});
                 },
                 title: Text('自动选择中文字幕'),
-                description: Text('开播时简体优先，没有简体用繁体，都没有就关闭字幕'),
+                description: Text('开播时简体优先，没有简体用繁体，都没有就用文件默认字幕'),
                 initialValue: autoSelectSubtitle,
               ),
               SettingsDropdownTile<String>(
