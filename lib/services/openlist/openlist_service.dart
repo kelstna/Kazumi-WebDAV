@@ -22,6 +22,7 @@ class OpenListEntry {
     required this.path,
     required this.isDir,
     this.size = 0,
+    this.modified = '',
   });
 
   final String name;
@@ -30,6 +31,9 @@ class OpenListEntry {
   final String path;
   final bool isDir;
   final int size;
+
+  /// WebDAV 的 getlastmodified 原样字符串，用于判断字体是否变化。
+  final String modified;
 }
 
 class OpenListException implements Exception {
@@ -62,6 +66,10 @@ class OpenListService {
       pluginName == sourceName ? displayName : pluginName;
 
   static const Duration _timeout = Duration(seconds: 15);
+  static const Duration _folderIndexTtl = Duration(minutes: 5);
+
+  List<OpenListEntry>? _folderIndex;
+  DateTime? _folderIndexAt;
 
   static const Set<String> videoExtensions = {
     '.mkv',
@@ -183,6 +191,10 @@ class OpenListService {
       final sizeNodes =
           node.findAllElements('getcontentlength', namespace: 'DAV:');
       final sizeText = sizeNodes.isEmpty ? null : sizeNodes.first.innerText;
+      final modifiedNodes =
+          node.findAllElements('getlastmodified', namespace: 'DAV:');
+      final modified =
+          modifiedNodes.isEmpty ? '' : modifiedNodes.first.innerText.trim();
       final name = (display == null || display.trim().isEmpty)
           ? decodedPath.split('/').last
           : display.trim();
@@ -191,6 +203,7 @@ class OpenListService {
         path: decodedPath,
         isDir: isDir,
         size: int.tryParse(sizeText ?? '') ?? 0,
+        modified: modified,
       ));
     }
     return entries;
@@ -210,16 +223,101 @@ class OpenListService {
         .replaceAll(RegExp(r'[\s\-_\[\]()（）【】.,!?:;_]+'), '');
   }
 
-  /// 在 OpenList 根目录里按番剧名找文件夹。
+  /// 让下一次搜索重新扫描目录（修改 WebDAV 设置后调用）。
+  void invalidateFolderIndex() {
+    _folderIndex = null;
+    _folderIndexAt = null;
+  }
+
+  bool _isHiddenDir(String name) {
+    final lower = name.toLowerCase();
+    return name.startsWith('.') ||
+        name.startsWith('@') ||
+        lower == '#recycle' ||
+        lower == '\$recycle.bin' ||
+        lower == 'system volume information';
+  }
+
+  bool _isIgnoredDir(String path, String name) {
+    final raw =
+        GStorage.getSetting<String>(SettingsKeys.openListIgnoredDirs).trim();
+    if (raw.isEmpty) {
+      return false;
+    }
+    for (final line in raw.split(RegExp(r'[\r\n,]+'))) {
+      final item = line.trim();
+      if (item.isEmpty) {
+        continue;
+      }
+      if (item.startsWith('/')) {
+        final normalized = item.endsWith('/') && item.length > 1
+            ? item.substring(0, item.length - 1)
+            : item;
+        if (path == normalized || path.startsWith('$normalized/')) {
+          return true;
+        }
+      } else if (name.toLowerCase().contains(item.toLowerCase())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 递归收集根目录下的所有文件夹，供搜索使用。
+  Future<List<OpenListEntry>> _collectFolders() async {
+    final cached = _folderIndex;
+    final cachedAt = _folderIndexAt;
+    if (cached != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _folderIndexTtl) {
+      return cached;
+    }
+    final root = rootPath;
+    final folders = <OpenListEntry>[];
+    final queue = <({String path, int depth})>[(path: root, depth: 0)];
+    final scanned = <String>{};
+    while (queue.isNotEmpty && folders.length < 800) {
+      final current = queue.removeAt(0);
+      if (!scanned.add(current.path)) {
+        continue;
+      }
+      List<OpenListEntry> entries;
+      try {
+        entries = await list(current.path);
+      } catch (error) {
+        KazumiLogger()
+            .w('OpenListService: failed to list ${current.path}', error: error);
+        continue;
+      }
+      for (final entry in entries) {
+        if (!entry.isDir) {
+          continue;
+        }
+        if (_isHiddenDir(entry.name) ||
+            _isIgnoredDir(entry.path, entry.name)) {
+          continue;
+        }
+        folders.add(entry);
+        if (current.depth < 6) {
+          queue.add((path: entry.path, depth: current.depth + 1));
+        }
+      }
+    }
+    _folderIndex = folders;
+    _folderIndexAt = DateTime.now();
+    return folders;
+  }
+
+  /// 在 WebDAV 根目录及其子目录里按番剧名找文件夹。
   Future<List<SearchItem>> search(String keyword) async {
-    final entries = await list(rootPath);
-    final dirs = entries.where((entry) => entry.isDir).toList();
     final query = _normalizeName(keyword);
     if (query.isEmpty) {
       return const [];
     }
-    final scored = <({int score, OpenListEntry entry})>[];
-    for (final entry in dirs) {
+    final folders = await _collectFolders();
+    final rootSegments = rootPath.split('/').where((s) => s.isNotEmpty).length;
+    final scored = <({int score, int depth, OpenListEntry entry})>[];
+    for (final entry in folders) {
       final name = _normalizeName(entry.name);
       var score = 0;
       if (name == query) {
@@ -242,12 +340,17 @@ class OpenListService {
         }
       }
       if (score > 0) {
-        scored.add((score: score, entry: entry));
+        final depth = entry.path.split('/').where((s) => s.isNotEmpty).length -
+            rootSegments;
+        scored.add((score: score, depth: depth, entry: entry));
       }
     }
     scored.sort((a, b) {
       if (a.score != b.score) {
         return b.score.compareTo(a.score);
+      }
+      if (a.depth != b.depth) {
+        return a.depth.compareTo(b.depth);
       }
       return a.entry.name.compareTo(b.entry.name);
     });

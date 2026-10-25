@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 kelstna (AI-assisted modification, see NOTICE.md)
 // SPDX-License-Identifier: GPL-3.0-only
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/services/openlist/openlist_service.dart';
+import 'package:kazumi/services/player/subtitle/font_index_job.dart';
 import 'package:kazumi/services/player/subtitle/webdav_font_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
@@ -28,6 +31,7 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
   int _progressTotal = 0;
   int _listingDirs = 0;
   int _listingFiles = 0;
+  Timer? _progressTimer;
 
   @override
   void initState() {
@@ -35,13 +39,65 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
     _directory = TextEditingController(
       text: GStorage.getSetting<String>(SettingsKeys.webdavFontDirectory),
     );
+    final job = FontIndexJob.instance;
+    job.phase.addListener(_onJobChanged);
+    job.done.addListener(_onJobChanged);
+    job.total.addListener(_onJobChanged);
+    job.directories.addListener(_onJobChanged);
+    job.files.addListener(_onJobChanged);
+    _syncJob();
     _reloadStatus();
   }
 
   @override
   void dispose() {
+    _progressTimer?.cancel();
+    final job = FontIndexJob.instance;
+    job.phase.removeListener(_onJobChanged);
+    job.done.removeListener(_onJobChanged);
+    job.total.removeListener(_onJobChanged);
+    job.directories.removeListener(_onJobChanged);
+    job.files.removeListener(_onJobChanged);
     _directory.dispose();
     super.dispose();
+  }
+
+  void _syncJob() {
+    final job = FontIndexJob.instance;
+    _busy = job.phase.value == FontIndexPhase.listing ||
+        job.phase.value == FontIndexPhase.reading;
+    _progressDone = job.done.value;
+    _progressTotal = job.total.value;
+    _listingDirs = job.directories.value;
+    _listingFiles = job.files.value;
+  }
+
+  void _onJobChanged() {
+    if (!mounted) {
+      return;
+    }
+    final phase = FontIndexJob.instance.phase.value;
+    final finished = phase == FontIndexPhase.idle ||
+        phase == FontIndexPhase.done ||
+        phase == FontIndexPhase.error;
+    if (finished) {
+      _progressTimer?.cancel();
+      final wasRunning = _busy;
+      setState(_syncJob);
+      if (wasRunning && !_busy) {
+        _reloadStatus();
+      }
+      return;
+    }
+    // 进度最多每 300ms 刷一次，避免整页频繁重建。
+    if (_progressTimer?.isActive ?? false) {
+      return;
+    }
+    _progressTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(_syncJob);
+      }
+    });
   }
 
   Future<void> _reloadStatus() async {
@@ -73,50 +129,19 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
   }
 
   Future<void> _buildIndex() async {
-    if (_busy) {
+    if (FontIndexJob.instance.isRunning) {
       return;
     }
-    setState(() {
-      _busy = true;
-      _progressDone = 0;
-      _progressTotal = 0;
-      _listingDirs = 0;
-      _listingFiles = 0;
-    });
-    try {
-      final count = await WebDavFontService.instance.buildIndex(
-        onListing: (directories, files) {
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _listingDirs = directories;
-            _listingFiles = files;
-          });
-        },
-        onProgress: (done, total) {
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _progressDone = done;
-            _progressTotal = total;
-          });
-        },
-      );
-      if (mounted) {
-        KazumiDialog.showToast(message: '索引完成，共 $count 个字体');
-      }
-    } catch (error) {
-      if (mounted) {
-        KazumiDialog.showToast(message: '建立索引失败：$error');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-        await _reloadStatus();
-      }
+    // 丢给 App 级任务：离开这个页面也会继续建索引。
+    unawaited(FontIndexJob.instance.start());
+  
+  }
+
+  Future<void> _forceRebuild() async {
+    if (FontIndexJob.instance.isRunning) {
+      return;
     }
+    unawaited(FontIndexJob.instance.start(force: true));
   }
 
   void _showIndexPreview() {
@@ -176,7 +201,7 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
         children: [
           Text(
             'Kazumi 会扫描这个 WebDAV 目录里的 .ttf/.otf/.ttc，读取字体名建立本地索引；'
-            '播放外挂 ASS 时按「手动导入 → Download/KazumiFonts → WebDAV」的顺序找字体，'
+            '播放外挂 ASS/SSA 时按「手动导入 → Download/KazumiFonts → WebDAV」的顺序找字体，'
             '都没有才下载。WebDAV 上不需要放索引文件。',
             style: theme.textTheme.bodySmall,
           ),
@@ -215,6 +240,12 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
             icon: const Icon(Icons.refresh_rounded),
             label: const Text('用当前目录重建索引'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _forceRebuild,
+            icon: const Icon(Icons.cleaning_services_rounded),
+            label: const Text('强制重建（忽略缓存）'),
+          ),
           if (_busy) ...[
             const SizedBox(height: 16),
             LinearProgressIndicator(
@@ -227,6 +258,20 @@ class _WebDavFontsSettingsPageState extends State<WebDavFontsSettingsPage> {
               _progressTotal > 0
                   ? '正在读取字体信息 $_progressDone / $_progressTotal'
                   : '正在扫描目录… 已扫描 $_listingDirs 个目录 / $_listingFiles 个字体',
+              style: theme.textTheme.bodySmall,
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: FontIndexJob.instance.cancel,
+                child: const Text('取消'),
+              ),
+            ),
+          ],
+          if (!_busy && FontIndexJob.instance.message.value.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              FontIndexJob.instance.message.value,
               style: theme.textTheme.bodySmall,
             ),
           ],

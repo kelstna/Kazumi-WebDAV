@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/openlist/openlist_service.dart';
@@ -21,16 +22,24 @@ class WebDavFontFace {
     required this.size,
     required this.family,
     required this.aliases,
+    this.path = '',
+    this.modified = '',
   });
 
   final String file;
+
+  /// 字体在 WebDAV 上的完整路径（字体包可能按子目录存放）。
+  final String path;
   final int size;
+  final String modified;
   final String family;
   final List<String> aliases;
 
   Map<String, dynamic> toJson() => {
         'file': file,
+        'path': path,
         'size': size,
+        'modified': modified,
         'family': family,
         'aliases': aliases,
       };
@@ -38,7 +47,9 @@ class WebDavFontFace {
   factory WebDavFontFace.fromJson(Map<String, dynamic> json) {
     return WebDavFontFace(
       file: json['file'] as String? ?? '',
+      path: json['path'] as String? ?? '',
       size: (json['size'] as num?)?.toInt() ?? 0,
+      modified: json['modified'] as String? ?? '',
       family: json['family'] as String? ?? '',
       aliases: (json['aliases'] as List?)?.cast<String>() ?? const [],
     );
@@ -145,6 +156,8 @@ class WebDavFontService {
   Future<int> buildIndex({
     void Function(int done, int total)? onProgress,
     void Function(int directories, int files)? onListing,
+    bool Function()? shouldCancel,
+    bool force = false,
   }) async {
     final directory = normalizedDirectory;
     if (directory.isEmpty) {
@@ -165,7 +178,12 @@ class WebDavFontService {
     final pending = <OpenListEntry>[];
     for (final entry in files) {
       final old = oldByFile[entry.name];
-      if (old != null && old.size == entry.size) {
+      final unchanged = old != null &&
+          !force &&
+          old.size == entry.size &&
+          old.path.isNotEmpty &&
+          (entry.modified.isEmpty || old.modified == entry.modified);
+      if (unchanged) {
         faces.add(old);
       } else {
         pending.add(entry);
@@ -174,28 +192,58 @@ class WebDavFontService {
 
     var done = faces.length;
     onProgress?.call(done, files.length);
-    const batchSize = 4;
-    for (var start = 0; start < pending.length; start += batchSize) {
-      final batch = pending.skip(start).take(batchSize);
-      final results = await Future.wait(batch.map(_readFace));
-      for (final result in results) {
-        faces.add(result);
+    final client = http.Client();
+    const batchSize = 8;
+    var batchesSinceCheckpoint = 0;
+    final dir = await _baseDir();
+    try {
+      for (var start = 0; start < pending.length; start += batchSize) {
+        if (shouldCancel?.call() ?? false) {
+          throw FontIndexCancelled();
+        }
+        final batch = pending.skip(start).take(batchSize).toList();
+        final headers = await Future.wait(
+          batch.map((entry) => _readHeader(entry, client)),
+        );
+        final inputs = headers.whereType<Map<String, Object>>().toList();
+        if (inputs.isNotEmpty) {
+          // 字体表解析放到后台 isolate，主线程只收进度。
+          final parsed = await compute(_parseFontHeaders, inputs);
+          faces.addAll(parsed.map(WebDavFontFace.fromJson));
+        }
+        done += batch.length;
+        onProgress?.call(done, files.length);
+        batchesSinceCheckpoint++;
+        // 每 10 批（约 80 个字体）落一次盘。
+        if (batchesSinceCheckpoint >= 10) {
+          batchesSinceCheckpoint = 0;
+          await _writeIndex(dir, directory, faces);
+        }
       }
-      done += results.length;
-      onProgress?.call(done, files.length);
+    } finally {
+      client.close();
     }
 
     faces.sort((a, b) => a.file.toLowerCase().compareTo(b.file.toLowerCase()));
-    final dir = await _baseDir();
-    await _indexFile(dir).writeAsString(jsonEncode({
+    await _writeIndex(dir, directory, faces);
+    KazumiLogger().i(
+        'WebDavFontService: indexed ${faces.length} fonts in $directory');
+    return faces.length;
+  }
+
+  Future<void> _writeIndex(
+    Directory dir,
+    String directory,
+    List<WebDavFontFace> faces,
+  ) async {
+    final payload = <String, Object>{
       'version': 1,
       'directory': directory,
       'builtAt': DateTime.now().toIso8601String(),
       'faces': faces.map((face) => face.toJson()).toList(),
-    }), flush: true);
-    KazumiLogger().i(
-        'WebDavFontService: indexed ${faces.length} fonts in $directory');
-    return faces.length;
+    };
+    final encoded = await compute(_encodeIndexPayload, payload);
+    await _indexFile(dir).writeAsString(encoded, flush: true);
   }
 
   /// 字体包经常按类型分子目录，这里做有限深度的递归扫描。
@@ -217,6 +265,8 @@ class WebDavFontService {
       List<OpenListEntry> entries;
       try {
         entries = await OpenListService.instance.list(directory);
+        // 让出事件循环，避免连续解析 PROPFIND XML 顶住 UI。
+        await Future<void>.delayed(Duration.zero);
       } catch (error) {
         KazumiLogger().w(
           'WebDavFontService: failed to list $directory',
@@ -569,7 +619,12 @@ class WebDavFontService {
   Future<bool> _downloadFont(WebDavFontFace face, String fontDir) async {
     try {
       final response = await http
-          .get(OpenListService.instance.uriFor('$normalizedDirectory/${face.file}'),
+          .get(
+              OpenListService.instance.uriFor(
+                face.path.isNotEmpty
+                    ? face.path
+                    : '$normalizedDirectory/${face.file}',
+              ),
               headers: OpenListService.instance.authHeaders)
           .timeout(const Duration(seconds: 60));
       if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
@@ -623,44 +678,67 @@ class WebDavFontService {
   static String _normalize(String value) =>
       value.replaceAll(RegExp(r'[\s_\-·．.（）()\[\]]+'), '').toLowerCase();
 
-  Future<WebDavFontFace> _readFace(OpenListEntry entry) async {
-    final names = await _readFontNames(entry.path);
-    final family = names.isNotEmpty ? names.first : p.basenameWithoutExtension(entry.name);
-    final aliases = <String>{...names, p.basenameWithoutExtension(entry.name)}
-        .where((value) => value.trim().isNotEmpty)
-        .toList(growable: false);
-    return WebDavFontFace(
-      file: entry.name,
-      size: entry.size,
-      family: family,
-      aliases: aliases,
-    );
+  Future<Map<String, Object>?> _readHeader(
+    OpenListEntry entry,
+    http.Client client,
+  ) async {
+    final bytes = await _readHeaderBytes(entry.path, client);
+    if (bytes == null || bytes.isEmpty) {
+      return null;
+    }
+    return <String, Object>{
+      'name': entry.name,
+      'path': entry.path,
+      'size': entry.size,
+      'modified': entry.modified,
+      'bytes': bytes,
+    };
   }
 
-  Future<List<String>> _readFontNames(String path) async {
-    final client = http.Client();
+  Future<Uint8List?> _readHeaderBytes(String path, http.Client client) async {
     try {
       final request = http.Request('GET', OpenListService.instance.uriFor(path));
       request.headers.addAll(OpenListService.instance.authHeaders);
+      request.headers['Range'] = 'bytes=0-262143';
       final response = await client
           .send(request)
-          .timeout(const Duration(seconds: 30));
-      if (response.statusCode != 200) {
-        return const [];
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200 && response.statusCode != 206) {
+        return null;
       }
-      return await _readNamesFromStream(response.stream, path);
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in response.stream) {
+        builder.add(chunk);
+        if (builder.length >= 262144) {
+          break;
+        }
+      }
+      final bytes = builder.takeBytes();
+      return bytes.length > 262144
+          ? Uint8List.sublistView(bytes, 0, 262144)
+          : bytes;
     } catch (error) {
       KazumiLogger()
-          .w('WebDavFontService: failed to read names of $path', error: error);
-      return const [];
-    } finally {
-      client.close();
+          .w('WebDavFontService: failed to read header of $path', error: error);
+      return null;
     }
+  }
+
+  Future<List<String>> _readFontNames(String path, http.Client client) async {
+    final bytes = await _readHeaderBytes(path, client);
+    if (bytes == null) {
+      return const [];
+    }
+    return _namesFromBytes(bytes);
   }
 
   Future<List<String>> _readLocalFontNames(String path) async {
     try {
-      return await _readNamesFromStream(File(path).openRead(), path);
+      final bytes = await File(path).openRead(0, 262144).fold<BytesBuilder>(
+            BytesBuilder(copy: false),
+            (builder, chunk) => builder..add(chunk),
+          );
+      return _namesFromBytes(bytes.takeBytes());
     } catch (error) {
       KazumiLogger().w(
         'WebDavFontService: failed to read local font $path',
@@ -825,6 +903,163 @@ class WebDavFontService {
 }
 
 /// 只按需读取字体文件头部，不把整个字体下载下来。
+
+String _encodeIndexPayload(Map<String, Object> payload) =>
+    jsonEncode(payload);
+
+/// 后台 isolate：解析一批字体头，返回可直接 fromJson 的 map。
+List<Map<String, Object>> _parseFontHeaders(List<Map<String, Object>> inputs) {
+  final result = <Map<String, Object>>[];
+  for (final input in inputs) {
+    final name = input['name'] as String? ?? '';
+    final bytes = input['bytes'] as Uint8List? ?? Uint8List(0);
+    final names = _namesFromBytes(bytes);
+    final base = p.basenameWithoutExtension(name);
+    final aliases = <String>{...names, base}
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
+    result.add(<String, Object>{
+      'file': name,
+      'path': input['path'] as String? ?? '',
+      'size': input['size'] as int? ?? 0,
+      'modified': input['modified'] as String? ?? '',
+      'family': names.isNotEmpty ? names.first : base,
+      'aliases': aliases,
+    });
+  }
+  return result;
+}
+
+List<String> _namesFromBytes(Uint8List bytes) {
+  if (bytes.length < 12) {
+    return const [];
+  }
+  final tag = String.fromCharCodes(bytes.sublist(0, 4));
+  final names = <String>[];
+  if (tag == 'ttcf') {
+    final count = _byteU32(bytes, 8);
+    if (count <= 0 || count > 64 || bytes.length < 12 + 4 * count) {
+      return const [];
+    }
+    for (var i = 0; i < count; i++) {
+      names.addAll(_faceNamesFromBytes(bytes, _byteU32(bytes, 12 + 4 * i)));
+    }
+  } else {
+    names.addAll(_faceNamesFromBytes(bytes, 0));
+  }
+  return names.toSet().toList(growable: false);
+}
+
+List<String> _faceNamesFromBytes(Uint8List bytes, int base) {
+  if (bytes.length < base + 12) {
+    return const [];
+  }
+  final numTables = _byteU16(bytes, base + 4);
+  if (numTables <= 0 || numTables > 512) {
+    return const [];
+  }
+  final directoryEnd = base + 12 + 16 * numTables;
+  if (bytes.length < directoryEnd) {
+    return const [];
+  }
+  var nameOffset = 0;
+  var nameLength = 0;
+  for (var i = 0; i < numTables; i++) {
+    final record = base + 12 + 16 * i;
+    final tag = String.fromCharCodes(bytes.sublist(record, record + 4));
+    if (tag == 'name') {
+      nameOffset = _byteU32(bytes, record + 8);
+      nameLength = _byteU32(bytes, record + 12);
+      break;
+    }
+  }
+  if (nameOffset <= 0 || nameLength <= 0 || nameLength > 2 * 1024 * 1024) {
+    return const [];
+  }
+  return _parseNameTableBytes(bytes, nameOffset, nameLength);
+}
+
+List<String> _parseNameTableBytes(Uint8List data, int offset, int length) {
+  if (offset + 6 > data.length) {
+    return const [];
+  }
+  final count = _byteU16(data, offset + 2);
+  final stringOffset = _byteU16(data, offset + 4);
+  if (count <= 0 || count > 4096) {
+    return const [];
+  }
+  final end = (offset + length).clamp(0, data.length);
+  final names = <String>{};
+  for (var i = 0; i < count; i++) {
+    final record = offset + 6 + 12 * i;
+    if (record + 12 > end) {
+      break;
+    }
+    final platform = _byteU16(data, record);
+    final nameId = _byteU16(data, record + 6);
+    final nameLength = _byteU16(data, record + 8);
+    final nameOffset = _byteU16(data, record + 10);
+    if (nameId != 1 &&
+        nameId != 4 &&
+        nameId != 6 &&
+        nameId != 16 &&
+        nameId != 17) {
+      continue;
+    }
+    final start = offset + stringOffset + nameOffset;
+    final stop = start + nameLength;
+    if (start < 0 || stop > end || stop > data.length || nameLength == 0) {
+      continue;
+    }
+    final text = _decodeNameBytes(data, start, nameLength, platform);
+    final trimmed = text.replaceAll(RegExp(r'[\x00-\x1F]'), '').trim();
+    if (trimmed.isNotEmpty) {
+      names.add(trimmed);
+    }
+  }
+  return names.toList();
+}
+
+String _decodeNameBytes(
+    Uint8List data, int start, int length, int platform) {
+  try {
+    if (platform == 0) {
+      final units = <int>[];
+      for (var i = 0; i + 1 < length; i += 2) {
+        units.add((data[start + i] << 8) | data[start + i + 1]);
+      }
+      return String.fromCharCodes(units);
+    }
+    if (platform == 3) {
+      final units = <int>[];
+      for (var i = 0; i + 1 < length; i += 2) {
+        units.add(data[start + i] | (data[start + i + 1] << 8));
+      }
+      return String.fromCharCodes(units);
+    }
+    return String.fromCharCodes(data.sublist(start, start + length));
+  } catch (_) {
+    return '';
+  }
+}
+
+int _byteU16(Uint8List data, int offset) {
+  if (offset < 0 || offset + 2 > data.length) {
+    return 0;
+  }
+  return (data[offset] << 8) | data[offset + 1];
+}
+
+int _byteU32(Uint8List data, int offset) {
+  if (offset < 0 || offset + 4 > data.length) {
+    return 0;
+  }
+  return (data[offset] << 24) |
+      (data[offset + 1] << 16) |
+      (data[offset + 2] << 8) |
+      data[offset + 3];
+}
+
 class _FontReader {
   _FontReader(this._iterator);
 
@@ -849,4 +1084,9 @@ class _FontReader {
     }
     return _buffer.length >= end;
   }
+}
+
+/// 用户取消建索引时抛出，由后台任务捕获。
+class FontIndexCancelled implements Exception {
+  const FontIndexCancelled();
 }

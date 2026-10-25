@@ -636,6 +636,13 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  /// 搜索时跳过的目录：每行一个绝对路径或文件夹名。
+  static const openListIgnoredDirs = SettingKey<String>(
+    'openListIgnoredDirs',
+    '',
+    group: SettingGroup.player,
+  );
+
   /// OpenList 在「播放来源」里的顺序（规则管理里拖动后保存）。
   static const openListSourceIndex = SettingKey<int>(
     'openListSourceIndex',
@@ -757,6 +764,7 @@ class SettingsKeys {
     openListRootPath,
     openListUser,
     openListPassword,
+    openListIgnoredDirs,
     openListSourceIndex,
   ];
 

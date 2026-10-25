@@ -42,7 +42,7 @@ void _showCustomKeywordDialog({
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
           labelText: '检索关键词',
-          helperText: '仅检索来源：$sourceName',
+          helperText: '仅检索来源：${OpenListService.displayFor(sourceName)}',
           helperMaxLines: 3,
           border: const OutlineInputBorder(),
         ),
@@ -131,7 +131,7 @@ class _AliasPickerDialogState extends State<_AliasPickerDialog> {
                   Text('别名检索', style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 8),
                   Text(
-                    '仅检索来源：${widget.sourceName}',
+                    '仅检索来源：${OpenListService.displayFor(widget.sourceName)}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),

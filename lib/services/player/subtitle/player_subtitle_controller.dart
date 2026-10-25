@@ -12,6 +12,7 @@ import 'package:kazumi/services/player/subtitle/subtitle_font_service.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_repository.dart';
 import 'package:kazumi/services/player/subtitle/webdav_font_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/episode_number.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
@@ -133,6 +134,7 @@ class PlayerSubtitleController extends ChangeNotifier {
     _externalEntries
       ..clear()
       ..addAll(entries);
+    _sortExternalEntries();
     _externalLoaded = true;
     _loading = false;
     _notify();
@@ -157,10 +159,17 @@ class PlayerSubtitleController extends ChangeNotifier {
 
   /// 解析外挂 ASS 引用的字体，缺的从服务器字体库拉取，然后让 libass 重扫。
   Future<void> _applyExternalFonts(Player player) async {
-    final files = _externalEntries
-        .map((entry) => entry.uri)
-        .whereType<String>()
-        .toList(growable: false);
+    // 只解析「与当前视频匹配」的字幕，避免把同目录其它集的字体也下载一遍。
+    final files = <String>{};
+    final selected = _selected;
+    if (selected != null && selected.isExternal && selected.uri != null) {
+      files.add(selected.uri!);
+    }
+    for (final entry in _matchingExternalEntries()) {
+      if (entry.uri != null) {
+        files.add(entry.uri!);
+      }
+    }
     if (files.isEmpty) {
       return;
     }
@@ -280,6 +289,23 @@ class PlayerSubtitleController extends ChangeNotifier {
       // 还没有任何字幕（轨道/外挂字幕可能来得晚），先不落锁。
       return;
     }
+    // 有外挂字幕时，先按「文件名 / 集数」匹配当前视频；
+    // 匹配不到宁可关闭字幕，也不要用同目录其它集的外挂字幕。
+    if (_externalEntries.isNotEmpty) {
+      final pick = _pickExternalForVideo();
+      _autoApplied = true;
+      if (pick != null) {
+        unawaited(_applySelection(pick));
+        KazumiLogger().i(
+            'PlayerSubtitleController: auto-selected external subtitle "${pick.title}"');
+      } else {
+        unawaited(_applySelection(null));
+        KazumiLogger().i(
+            'PlayerSubtitleController: no external subtitle matches video, disabled');
+      }
+      return;
+    }
+
     final pick = _pickPreferredEntry();
     _autoApplied = true;
     if (pick != null) {
@@ -355,6 +381,142 @@ class PlayerSubtitleController extends ChangeNotifier {
       }
     }
     return allEntries.isEmpty ? null : allEntries.first;
+  }
+
+  String get _videoFileName {
+    final uri = Uri.tryParse(_videoUrl);
+    final segments =
+        uri?.pathSegments.where((segment) => segment.isNotEmpty).toList() ??
+            const <String>[];
+    if (segments.isEmpty) {
+      return '';
+    }
+    return Uri.decodeComponent(segments.last);
+  }
+
+  /// 去掉最后一个扩展名（视频的 .mkv 和字幕的 .ass 都要去掉），
+  /// 不猜语言后缀：`foo.sc.ass` 只去掉 `.ass`，保留 `.sc`。
+  static String _subtitleBaseName(String name) {
+    var value = name.toLowerCase().trim();
+    final dot = value.lastIndexOf('.');
+    if (dot > 0) {
+      value = value.substring(0, dot);
+    }
+    return value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// 选集面板按「当前视频」排序：同文件名 → 同集数 → 简体 → 繁体 → 其它。
+  void _sortExternalEntries() {
+    final videoName = _videoFileName;
+    if (videoName.isEmpty) {
+      return;
+    }
+    final videoBase = _subtitleBaseName(videoName);
+    final videoEpisode = parseEpisodeNumber(videoName);
+    int rank(SubtitleEntry entry) {
+      if (_subtitleBaseName(entry.title) == videoBase) {
+        return 0;
+      }
+      if (videoEpisode != null) {
+        final episode = parseEpisodeNumber(entry.title);
+        if (episode != null && episode == videoEpisode) {
+          return 1;
+        }
+      }
+      return 2;
+    }
+
+    _externalEntries.sort((a, b) {
+      final rankDiff = rank(a).compareTo(rank(b));
+      if (rankDiff != 0) {
+        return rankDiff;
+      }
+      final languageA = _chineseRank(a) ?? 3;
+      final languageB = _chineseRank(b) ?? 3;
+      if (languageA != languageB) {
+        return languageA.compareTo(languageB);
+      }
+      return a.title.compareTo(b.title);
+    });
+  }
+
+  /// 与当前视频匹配的外挂字幕：文件名完全相同优先，其次集数相同。
+  List<SubtitleEntry> _matchingExternalEntries() {
+    final videoName = _videoFileName;
+    if (videoName.isEmpty || _externalEntries.isEmpty) {
+      return const [];
+    }
+    final videoBase = _subtitleBaseName(videoName);
+    final videoEpisode = parseEpisodeNumber(videoName);
+    final exact = <SubtitleEntry>[];
+    final sameEpisode = <SubtitleEntry>[];
+    for (final entry in _externalEntries) {
+      if (_subtitleBaseName(entry.title) == videoBase) {
+        exact.add(entry);
+        continue;
+      }
+      if (videoEpisode != null) {
+        final episode = parseEpisodeNumber(entry.title);
+        if (episode != null && episode == videoEpisode) {
+          sameEpisode.add(entry);
+        }
+      }
+    }
+    if (exact.isNotEmpty) {
+      return exact;
+    }
+    return sameEpisode;
+  }
+
+  /// 按档位选择：文件名完全相同 → 同集数。
+  /// 档位优先于语言；只有同集数档里没有中文时才返回 null（不用字幕）。
+  SubtitleEntry? _pickExternalForVideo() {
+    final videoName = _videoFileName;
+    if (videoName.isEmpty || _externalEntries.isEmpty) {
+      return null;
+    }
+    final videoBase = _subtitleBaseName(videoName);
+    final videoEpisode = parseEpisodeNumber(videoName);
+    final exact = <SubtitleEntry>[];
+    final sameEpisode = <SubtitleEntry>[];
+    for (final entry in _externalEntries) {
+      if (_subtitleBaseName(entry.title) == videoBase) {
+        exact.add(entry);
+        continue;
+      }
+      if (videoEpisode != null) {
+        final episode = parseEpisodeNumber(entry.title);
+        if (episode != null && episode == videoEpisode) {
+          sameEpisode.add(entry);
+        }
+      }
+    }
+    if (exact.isNotEmpty) {
+      return _pickByLanguage(exact, allowNonChinese: true);
+    }
+    if (sameEpisode.isNotEmpty) {
+      return _pickByLanguage(sameEpisode, allowNonChinese: false);
+    }
+    return null;
+  }
+
+  SubtitleEntry? _pickByLanguage(
+    List<SubtitleEntry> entries, {
+    required bool allowNonChinese,
+  }) {
+    if (entries.isEmpty) {
+      return null;
+    }
+    final chinese = entries.where((entry) => _chineseRank(entry) != null).toList()
+      ..sort((a, b) {
+        final rankA = _chineseRank(a)!;
+        final rankB = _chineseRank(b)!;
+        return rankA.compareTo(rankB);
+      });
+    if (chinese.isNotEmpty) {
+      return chinese.first;
+    }
+    return allowNonChinese ? entries.first : null;
   }
 
   SubtitleEntry? _pickPreferredEntry() {
