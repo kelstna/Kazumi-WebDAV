@@ -32,46 +32,15 @@ class StartWatchingHero extends StatelessWidget {
       tag: tag,
       flightShuttleBuilder: (flightContext, animation, direction,
           fromHeroContext, toHeroContext) {
-        final theme = Theme.of(flightContext);
-        final colors = theme.colorScheme;
-        final isPush = direction == HeroFlightDirection.push;
-        // 内容在动画开始时就切换：push 立刻显示「三角 + 开始观看」，
-        // pop 立刻显示回顶箭头；绿底尺寸由 Hero 的矩形驱动，
-        // 宽度/高度各自插值，形状平滑地从圆角矩形过渡到圆形。
-        final content = isPush
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.play_arrow_rounded,
-                      color: colors.onPrimaryContainer, size: 24),
-                  const SizedBox(width: 8),
-                  Text(
-                    '开始观看',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.onPrimaryContainer,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              )
-            : Icon(Icons.arrow_upward_rounded,
-                color: colors.onPrimaryContainer, size: 24);
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final height = constraints.maxHeight;
-            final radius = height.isFinite ? height / 2 : 24.0;
-            return Material(
-              color: colors.primaryContainer,
-              borderRadius: BorderRadius.circular(radius),
-              clipBehavior: Clip.antiAlias,
-              child: Center(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: content,
-                ),
-              ),
-            );
-          },
+        final from = (fromHeroContext.widget as Hero).child;
+        final to = (toHeroContext.widget as Hero).child;
+        // push/pop 都显示「开始观看」按钮本身，并整体等比缩放，
+        // 这样文字和三角图标会和按钮一起变小/变大，而不是只缩放背景。
+        final button = direction == HeroFlightDirection.push ? to : from;
+        return FittedBox(
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          child: button,
         );
       },
       child: child,

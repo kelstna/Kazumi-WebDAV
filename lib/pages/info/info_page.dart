@@ -473,7 +473,6 @@ class _InfoPageState extends State<InfoPage>
         tag: kBackToTopHeroTag,
         child: FloatingActionButton.extended(
           heroTag: null,
-          shape: const StadiumBorder(),
           tooltip: '开始观看',
           onPressed: _startWatching,
           label: const Text('开始观看'),
