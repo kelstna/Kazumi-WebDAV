@@ -11,8 +11,10 @@ import 'package:kazumi/services/player/subtitle/subtitle_entry.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_font_service.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_repository.dart';
 import 'package:kazumi/services/player/subtitle/webdav_font_service.dart';
+import 'package:kazumi/services/player/track_memory.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/episode_number.dart';
+import 'package:kazumi/utils/track_matching.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
@@ -41,12 +43,25 @@ class PlayerSubtitleController extends ChangeNotifier {
   bool _tracksSeen = false;
   bool _externalLoaded = false;
 
+  /// 本集记忆：只按这一个视频恢复，不跨集沿用。
+  String _videoKey = '';
+  bool _memoryChecked = false;
+  bool _hasMemory = false;
+
   String _videoUrl = '';
   bool _isLocalPlayback = false;
   Map<String, String> _headers = const {};
 
   List<SubtitleEntry> _embeddedEntries = const [];
   final List<SubtitleEntry> _externalEntries = [];
+
+  /// mpv 原始字幕轨（含 `sub-add` 加进来的外挂轨）。
+  List<SubtitleEntry> _rawTrackEntries = const [];
+
+  /// mpv `track-list` 里每条字幕轨的附加信息。
+  Map<String, _MpvSubtitleTrack> _trackMeta = const {};
+  String _lastTrackListRaw = '';
+  bool _trackMetaLoading = false;
 
   SubtitleEntry? _selected;
   bool _loading = false;
@@ -71,6 +86,9 @@ class PlayerSubtitleController extends ChangeNotifier {
 
   bool get hasAnySubtitle => allEntries.isNotEmpty;
 
+  /// 本集是否有记住的手动选择。
+  bool get hasRememberedSelection => _hasMemory;
+
   bool get isAttached => _player != null;
 
   /// 每次开播后调用：清空上一集的字幕状态并重新发现。
@@ -85,6 +103,12 @@ class PlayerSubtitleController extends ChangeNotifier {
     _videoUrl = videoUrl;
     _isLocalPlayback = isLocalPlayback;
     _headers = headers;
+    _videoKey = TrackMemoryStore.keyFor(videoUrl);
+    _memoryChecked = false;
+    _hasMemory = false;
+    _rawTrackEntries = const [];
+    _trackMeta = const {};
+    _lastTrackListRaw = '';
     _embeddedEntries = const [];
     _externalEntries.clear();
     _selected = null;
@@ -100,6 +124,7 @@ class PlayerSubtitleController extends ChangeNotifier {
     _tracksSubscription = player.stream.tracks.listen(_onTracks);
     _trackSubscription = player.stream.track.listen(_onCurrentTrackChanged);
     _onTracks(player.state.tracks);
+    unawaited(_refreshTrackMeta());
 
     unawaited(_configureLibass(player));
     unawaited(_prepareFonts(player));
@@ -226,18 +251,18 @@ class PlayerSubtitleController extends ChangeNotifier {
   }
 
   void _onTracks(Tracks tracks) {
-    final embedded = tracks.subtitle
+    _rawTrackEntries = tracks.subtitle
         .where((track) => track.id != 'auto' && track.id != 'no')
         .map(SubtitleEntry.fromTrack)
         .toList(growable: false);
-    _embeddedEntries = embedded;
+    _applyTrackFilter();
     _tracksSeen = true;
 
     final player = _player;
     if (_selected == null && !_userChosen && player != null) {
       final current = player.state.track.subtitle;
       if (current.id != 'auto' && current.id != 'no') {
-        for (final entry in embedded) {
+        for (final entry in _embeddedEntries) {
           if (entry.id == current.id) {
             _selected = entry;
             break;
@@ -246,7 +271,133 @@ class PlayerSubtitleController extends ChangeNotifier {
       }
     }
     _notify();
+    unawaited(_refreshTrackMeta());
     _autoSelectIfReady();
+  }
+
+  /// 按 mpv 的 `external` 标记把播放器自己加载的外挂轨从「内封」里剔掉。
+  ///
+  /// 选外挂字幕时 media_kit 走的是 `sub-add`，mpv 会把它当成一条新轨道，
+  /// 而 `player.stream.tracks` 不区分内外，不过滤就会出现同一个文件
+  /// 在「内封」和「外挂」里各出现一次。
+  void _applyTrackFilter() {
+    final meta = _trackMeta;
+    if (meta.isEmpty) {
+      _embeddedEntries = _rawTrackEntries;
+      return;
+    }
+    final embedded = <SubtitleEntry>[];
+    for (final entry in _rawTrackEntries) {
+      final info = meta[entry.id];
+      if (info != null && info.external) {
+        continue;
+      }
+      embedded.add(entry.copyWith(
+        forced: info?.forced ?? entry.forced,
+        image: info?.image ?? entry.image,
+      ));
+    }
+    _embeddedEntries = embedded;
+
+    final selected = _selected;
+    if (selected != null && selected.isEmbedded) {
+      final info = meta[selected.id];
+      if (info != null && info.external) {
+        _selected = _externalEntryForTrack(info, selected);
+      }
+    }
+  }
+
+  Future<void> _refreshTrackMeta() async {
+    final player = _player;
+    if (player == null || _disposed || _trackMetaLoading) {
+      return;
+    }
+    final platform = player.platform;
+    if (platform is! NativePlayer) {
+      return;
+    }
+    _trackMetaLoading = true;
+    try {
+      final raw = await platform.getProperty('track-list');
+      if (_disposed || !identical(_player, player)) {
+        return;
+      }
+      if (raw == _lastTrackListRaw) {
+        return;
+      }
+      _lastTrackListRaw = raw;
+      _trackMeta = _parseTrackList(raw);
+      _applyTrackFilter();
+      _notify();
+      _autoSelectIfReady();
+    } catch (error) {
+      KazumiLogger().w(
+        'PlayerSubtitleController: failed to read mpv track-list',
+        error: error,
+      );
+    } finally {
+      _trackMetaLoading = false;
+    }
+  }
+
+  Map<String, _MpvSubtitleTrack> _parseTrackList(String raw) {
+    final result = <String, _MpvSubtitleTrack>{};
+    if (raw.isEmpty) {
+      return result;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return result;
+      }
+      for (final item in decoded) {
+        if (item is! Map || item['type'] != 'sub') {
+          continue;
+        }
+        final id = item['id']?.toString() ?? '';
+        if (id.isEmpty) {
+          continue;
+        }
+        result[id] = _MpvSubtitleTrack(
+          external: item['external'] == true,
+          forced: item['forced'] == true,
+          image: item['image'] == true,
+          filename: item['external-filename']?.toString(),
+        );
+      }
+    } catch (_) {
+      // 解析失败就当作没有附加信息。
+    }
+    return result;
+  }
+
+  SubtitleEntry? _externalEntryForTrack(
+    _MpvSubtitleTrack info,
+    SubtitleEntry fallback,
+  ) {
+    final filename = info.filename;
+    if (filename == null || filename.isEmpty) {
+      return null;
+    }
+    final path = filename.startsWith('file://')
+        ? Uri.parse(filename).toFilePath()
+        : filename;
+    final base = p.basename(path);
+    for (final entry in _externalEntries) {
+      final entryName = entry.uri != null ? p.basename(entry.uri!) : entry.title;
+      if (entryName.toLowerCase() == base.toLowerCase()) {
+        return entry;
+      }
+    }
+    return SubtitleEntry(
+      id: path,
+      title: base,
+      rawTitle: base,
+      kind: SubtitleEntryKind.external,
+      uri: path,
+      codec: p.extension(base).replaceFirst('.', '').toUpperCase(),
+    );
   }
 
   void _onCurrentTrackChanged(Track track) {
@@ -273,7 +424,12 @@ class PlayerSubtitleController extends ChangeNotifier {
     }
   }
 
-  /// 自动挑字幕：简体 → 繁体 → 唯一/默认。不会把字幕关掉。
+  /// 自动挑字幕：有外挂就用外挂（中文优先），没有外挂才走内封规则。
+  ///
+  /// 和旧版的区别：
+  /// * 外挂匹配不上时不再关字幕，改为「候选里没有中文就按名称拿第一条」；
+  /// * 有外挂时不再退回内封（用户的片库习惯是外挂优先）；
+  /// * 自动选择跳过 forced 轨（只翻译外语对白的字幕）。
   void _autoSelectIfReady({bool fromTimer = false}) {
     if (_autoApplied || _userChosen || _disposed) {
       return;
@@ -281,16 +437,21 @@ class PlayerSubtitleController extends ChangeNotifier {
     if (!_tracksSeen || (!_externalLoaded && !fromTimer)) {
       return;
     }
+    // 本集记忆优先于任何自动规则；只恢复一次。
+    if (!_memoryChecked && _externalLoaded) {
+      _memoryChecked = true;
+      if (_restoreFromMemory()) {
+        return;
+      }
+    }
     if (!GStorage.getSetting(SettingsKeys.autoSelectSubtitle)) {
       _autoApplied = true;
       return;
     }
     if (allEntries.isEmpty) {
-      // 还没有任何字幕（轨道/外挂字幕可能来得晚），先不落锁。
+      // 轨道/外挂字幕可能来得晚，先不落锁。
       return;
     }
-    // 有外挂字幕时，先按「文件名 / 集数」匹配当前视频；
-    // 匹配不到宁可关闭字幕，也不要用同目录其它集的外挂字幕。
     if (_externalEntries.isNotEmpty) {
       final pick = _pickExternalForVideo();
       _autoApplied = true;
@@ -301,7 +462,7 @@ class PlayerSubtitleController extends ChangeNotifier {
       } else {
         unawaited(_applySelection(null));
         KazumiLogger().i(
-            'PlayerSubtitleController: no external subtitle matches video, disabled');
+            'PlayerSubtitleController: no external subtitle available, subtitle off');
       }
       return;
     }
@@ -314,13 +475,113 @@ class PlayerSubtitleController extends ChangeNotifier {
           'PlayerSubtitleController: auto-selected subtitle "${pick.title}"');
       return;
     }
-    // 没匹配到中文：唯一轨道就用它；否则退回「文件默认字幕」（mpv 的
-    // default 标记，没有标记时用第一条字幕轨），不会把字幕关掉。
+    // 没匹配到中文：唯一轨道就用它；否则退回「文件默认字幕」，不会把字幕关掉。
     if (allEntries.length == 1) {
       unawaited(_applySelection(allEntries.first));
     } else {
       unawaited(_applyDefaultWhenNoChinese());
     }
+  }
+
+  /// 恢复本集上次手动选择的字幕。
+  bool _restoreFromMemory() {
+    if (_videoKey.isEmpty || !TrackMemoryStore.instance.enabled) {
+      return false;
+    }
+    final memory = TrackMemoryStore.instance.readSubtitle(_videoKey);
+    if (memory == null) {
+      return false;
+    }
+    switch (memory.kind) {
+      case SubtitleMemoryKind.off:
+        _userChosen = true;
+        _autoApplied = true;
+        _hasMemory = true;
+        unawaited(_applySelection(null));
+        KazumiLogger().i(
+            'PlayerSubtitleController: restored "off" from memory ($_videoKey)');
+        return true;
+      case SubtitleMemoryKind.external:
+        final entry = _findExternalByMemory(memory);
+        if (entry == null) {
+          return false;
+        }
+        _userChosen = true;
+        _autoApplied = true;
+        _hasMemory = true;
+        unawaited(_applySelection(entry));
+        KazumiLogger().i(
+            'PlayerSubtitleController: restored external "${entry.title}" from memory');
+        return true;
+      case SubtitleMemoryKind.embedded:
+        final entry = _findEmbeddedByMemory(memory);
+        if (entry == null) {
+          return false;
+        }
+        _userChosen = true;
+        _autoApplied = true;
+        _hasMemory = true;
+        unawaited(_applySelection(entry));
+        KazumiLogger().i(
+            'PlayerSubtitleController: restored embedded "${entry.title}" from memory');
+        return true;
+    }
+  }
+
+  SubtitleEntry? _findExternalByMemory(SubtitleMemory memory) {
+    final name = (memory.name ?? '').toLowerCase();
+    if (name.isEmpty) {
+      return null;
+    }
+    for (final entry in _externalEntries) {
+      final title = entry.title.toLowerCase();
+      final file = entry.uri == null ? '' : p.basename(entry.uri!).toLowerCase();
+      if (title == name || file == name) {
+        return entry;
+      }
+    }
+    final candidates = memory.candidates ?? const [];
+    for (final entry in _externalEntries) {
+      if (candidates.contains(entry.title)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  SubtitleEntry? _findEmbeddedByMemory(SubtitleMemory memory) {
+    final language = _normalizeLanguage(memory.language);
+    final name = (memory.name ?? '').toLowerCase();
+    for (final entry in _embeddedEntries) {
+      if (_normalizeLanguage(entry.language) != language) {
+        continue;
+      }
+      final title = (entry.rawTitle ?? entry.title).toLowerCase();
+      if (name.isEmpty || title == name) {
+        return entry;
+      }
+    }
+    for (final entry in _embeddedEntries) {
+      final title = (entry.rawTitle ?? entry.title).toLowerCase();
+      if (name.isNotEmpty && title == name) {
+        return entry;
+      }
+    }
+    final candidates = memory.candidates ?? const [];
+    for (final entry in _embeddedEntries) {
+      if (candidates.contains(entry.title)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  String _normalizeLanguage(String? language) {
+    final value = (language ?? '').trim().toLowerCase();
+    if (value == 'chi' || value == 'zho' || value.startsWith('zh')) {
+      return 'zh';
+    }
+    return value;
   }
 
   Future<void> _applyDefaultWhenNoChinese() async {
@@ -350,14 +611,22 @@ class PlayerSubtitleController extends ChangeNotifier {
                   .where((track) => track['type'] == 'sub')
                   .toList(growable: false);
               if (subtitles.isNotEmpty) {
-                Map? target;
+                Map target = subtitles.first;
                 for (final track in subtitles) {
                   if (track['default'] == true) {
                     target = track;
                     break;
                   }
                 }
-                target ??= subtitles.first;
+                // 文件把 forced 轨标成默认时，优先换一条非 forced 的。
+                if (target['forced'] == true) {
+                  for (final track in subtitles) {
+                    if (track['forced'] != true) {
+                      target = track;
+                      break;
+                    }
+                  }
+                }
                 final id = target['id']?.toString();
                 for (final entry in allEntries) {
                   if (entry.isEmbedded && entry.id == id) {
@@ -373,6 +642,11 @@ class PlayerSubtitleController extends ChangeNotifier {
           'PlayerSubtitleController: failed to read mpv track-list',
           error: error,
         );
+      }
+    }
+    for (final entry in allEntries) {
+      if (entry.isEmbedded && !entry.forced) {
+        return entry;
       }
     }
     for (final entry in allEntries) {
@@ -440,8 +714,21 @@ class PlayerSubtitleController extends ChangeNotifier {
     });
   }
 
-  /// 与当前视频匹配的外挂字幕：文件名完全相同优先，其次集数相同。
+  /// 与当前视频匹配的外挂字幕，按档位取最近的一档：
+  /// 文件名完全相同 → 集数相同 → 同片不同压制。
   List<SubtitleEntry> _matchingExternalEntries() {
+    final candidates = _externalCandidates();
+    if (candidates.isNotEmpty) {
+      return candidates;
+    }
+    final selected = _selected;
+    if (selected != null && selected.isExternal) {
+      return [selected];
+    }
+    return const [];
+  }
+
+  List<SubtitleEntry> _externalCandidates() {
     final videoName = _videoFileName;
     if (videoName.isEmpty || _externalEntries.isEmpty) {
       return const [];
@@ -450,6 +737,7 @@ class PlayerSubtitleController extends ChangeNotifier {
     final videoEpisode = parseEpisodeNumber(videoName);
     final exact = <SubtitleEntry>[];
     final sameEpisode = <SubtitleEntry>[];
+    final sameTitle = <SubtitleEntry>[];
     for (final entry in _externalEntries) {
       if (_subtitleBaseName(entry.title) == videoBase) {
         exact.add(entry);
@@ -459,70 +747,74 @@ class PlayerSubtitleController extends ChangeNotifier {
         final episode = parseEpisodeNumber(entry.title);
         if (episode != null && episode == videoEpisode) {
           sameEpisode.add(entry);
+          continue;
         }
+      }
+      // 同片不同压制：标题词重合，且两边集数不冲突（电影没有集数）。
+      if (!episodesConflict(videoName, entry.title) &&
+          titleSimilarity(videoName, entry.title) >= 0.55) {
+        sameTitle.add(entry);
       }
     }
     if (exact.isNotEmpty) {
       return exact;
     }
-    return sameEpisode;
+    if (sameEpisode.isNotEmpty) {
+      return sameEpisode;
+    }
+    return sameTitle;
   }
 
-  /// 按档位选择：文件名完全相同 → 同集数。
-  /// 档位优先于语言；只有同集数档里没有中文时才返回 null（不用字幕）。
+  /// 自动选外挂字幕：候选里中文优先（简 → 繁 → 中文）；
+  /// 候选里没有中文就按名称选第一条；一档都没匹配上就全目录按名称第一条。
   SubtitleEntry? _pickExternalForVideo() {
-    final videoName = _videoFileName;
-    if (videoName.isEmpty || _externalEntries.isEmpty) {
+    if (_externalEntries.isEmpty) {
       return null;
     }
-    final videoBase = _subtitleBaseName(videoName);
-    final videoEpisode = parseEpisodeNumber(videoName);
-    final exact = <SubtitleEntry>[];
-    final sameEpisode = <SubtitleEntry>[];
-    for (final entry in _externalEntries) {
-      if (_subtitleBaseName(entry.title) == videoBase) {
-        exact.add(entry);
-        continue;
+    final candidates = _externalCandidates();
+    final pool = candidates.isEmpty ? _externalEntries : candidates;
+    final chinese = pool.where((entry) => _chineseRank(entry) != null).toList();
+    if (chinese.isEmpty) {
+      return _firstByTitle(pool);
+    }
+    final videoName = _videoFileName;
+    chinese.sort((a, b) {
+      final rankA = _chineseRank(a)!;
+      final rankB = _chineseRank(b)!;
+      if (rankA != rankB) {
+        return rankA.compareTo(rankB);
       }
-      if (videoEpisode != null) {
-        final episode = parseEpisodeNumber(entry.title);
-        if (episode != null && episode == videoEpisode) {
-          sameEpisode.add(entry);
-        }
+      final technicalA = technicalOverlap(videoName, a.title);
+      final technicalB = technicalOverlap(videoName, b.title);
+      if (technicalA != technicalB) {
+        return technicalB.compareTo(technicalA);
       }
-    }
-    if (exact.isNotEmpty) {
-      return _pickByLanguage(exact, allowNonChinese: true);
-    }
-    if (sameEpisode.isNotEmpty) {
-      return _pickByLanguage(sameEpisode, allowNonChinese: false);
-    }
-    return null;
+      final similarityA = titleSimilarity(videoName, a.title);
+      final similarityB = titleSimilarity(videoName, b.title);
+      if (similarityA != similarityB) {
+        return similarityB.compareTo(similarityA);
+      }
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+    return chinese.first;
   }
 
-  SubtitleEntry? _pickByLanguage(
-    List<SubtitleEntry> entries, {
-    required bool allowNonChinese,
-  }) {
+  SubtitleEntry? _firstByTitle(List<SubtitleEntry> entries) {
     if (entries.isEmpty) {
       return null;
     }
-    final chinese = entries.where((entry) => _chineseRank(entry) != null).toList()
-      ..sort((a, b) {
-        final rankA = _chineseRank(a)!;
-        final rankB = _chineseRank(b)!;
-        return rankA.compareTo(rankB);
-      });
-    if (chinese.isNotEmpty) {
-      return chinese.first;
-    }
-    return allowNonChinese ? entries.first : null;
+    final sorted = [...entries]
+      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    return sorted.first;
   }
 
   SubtitleEntry? _pickPreferredEntry() {
     int? bestRank;
     SubtitleEntry? best;
-    for (final entry in allEntries) {
+    // forced 轨只翻译外语对白，自动选择时跳过；只有全是 forced 才用它。
+    final usable = allEntries.where((entry) => !entry.forced).toList();
+    final pool = usable.isEmpty ? allEntries : usable;
+    for (final entry in pool) {
       final rank = _chineseRank(entry);
       if (rank == null) {
         continue;
@@ -602,6 +894,63 @@ class PlayerSubtitleController extends ChangeNotifier {
   Future<void> select(SubtitleEntry? entry) async {
     _userChosen = true;
     await _applySelection(entry);
+    _rememberSelection(entry);
+  }
+
+  /// 记住本集手动选择；关字幕记为 `off`。
+  void _rememberSelection(SubtitleEntry? entry) {
+    final key = _videoKey;
+    if (key.isEmpty) {
+      return;
+    }
+    _hasMemory = true;
+    if (entry == null) {
+      unawaited(TrackMemoryStore.instance.writeSubtitle(
+        key,
+        const SubtitleMemory(kind: SubtitleMemoryKind.off),
+      ));
+      return;
+    }
+    if (entry.isExternal) {
+      unawaited(TrackMemoryStore.instance.writeSubtitle(
+        key,
+        SubtitleMemory(
+          kind: SubtitleMemoryKind.external,
+          name: entry.title,
+          language: entry.language,
+          candidates: _externalEntries.map((item) => item.title).toList(),
+        ),
+      ));
+      return;
+    }
+    final candidates = _embeddedEntries
+        .where((item) =>
+            _normalizeLanguage(item.language) ==
+            _normalizeLanguage(entry.language))
+        .map((item) => item.title)
+        .toList();
+    unawaited(TrackMemoryStore.instance.writeSubtitle(
+      key,
+      SubtitleMemory(
+        kind: SubtitleMemoryKind.embedded,
+        name: entry.rawTitle ?? entry.title,
+        language: entry.language,
+        candidates: candidates,
+      ),
+    ));
+  }
+
+  /// 清掉本集的字幕记忆（面板里「清除记忆」用）。
+  Future<void> clearRememberedSelection() async {
+    if (_videoKey.isEmpty) {
+      return;
+    }
+    await TrackMemoryStore.instance.clear(_videoKey);
+    _hasMemory = false;
+    _userChosen = false;
+    _autoApplied = false;
+    _memoryChecked = true;
+    _notify();
   }
 
   Future<void> _applySelection(SubtitleEntry? entry) async {
@@ -688,6 +1037,12 @@ class PlayerSubtitleController extends ChangeNotifier {
     _player = null;
     _embeddedEntries = const [];
     _externalEntries.clear();
+    _rawTrackEntries = const [];
+    _trackMeta = const {};
+    _lastTrackListRaw = '';
+    _videoKey = '';
+    _memoryChecked = false;
+    _hasMemory = false;
     _selected = null;
     _loading = false;
     _error = null;
@@ -719,4 +1074,22 @@ class PlayerSubtitleController extends ChangeNotifier {
     _player = null;
     super.dispose();
   }
+}
+
+/// mpv `track-list` 里一条字幕轨的附加信息。
+class _MpvSubtitleTrack {
+  const _MpvSubtitleTrack({
+    required this.external,
+    required this.forced,
+    required this.image,
+    this.filename,
+  });
+
+  /// 由 `sub-add` 加进来的外挂轨。
+  final bool external;
+  final bool forced;
+  final bool image;
+
+  /// 外挂轨对应的本地文件（mpv `external-filename`）。
+  final String? filename;
 }

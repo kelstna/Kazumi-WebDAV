@@ -10,6 +10,7 @@ const _searchSortLabels = {
 String _sortLabel(String sort) => _searchSortLabels[sort] ?? '热度';
 
 String _filterSummary(SearchFilterState state) => [
+      if (!state.isAnimeScope) state.subjectTypeLabel,
       ...state.tags,
       if (state.season.isNotEmpty) state.season,
       if (state.season.isEmpty && state.dateRange != null)
@@ -213,7 +214,7 @@ class _SearchLoadingState extends StatelessWidget {
           const SizedBox(height: 20),
           Semantics(
               liveRegion: true,
-              child: Text('正在搜索番剧',
+              child: Text('正在搜索',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleMedium)),
         ]));

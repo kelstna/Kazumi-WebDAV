@@ -21,6 +21,10 @@ class PlaybackInitParams {
   final String? coverUrl;
   final String? bangumiName;
 
+  /// 作品原声语言（ISO 639-1）：动画直接由条目类型/标签推断，
+  /// 真人影视要等 bgm 详情返回后补上。
+  final String? expectedAudioLanguage;
+
   const PlaybackInitParams({
     required this.videoUrl,
     required this.offset,
@@ -39,6 +43,7 @@ class PlaybackInitParams {
     this.sortNumber,
     this.coverUrl,
     this.bangumiName,
+    this.expectedAudioLanguage,
   });
 }
 

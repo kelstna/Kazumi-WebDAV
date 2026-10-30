@@ -19,6 +19,7 @@ class SubtitleEntry {
     this.codec,
     this.uri,
     this.image = false,
+    this.forced = false,
   });
 
   factory SubtitleEntry.fromTrack(SubtitleTrack track) {
@@ -49,9 +50,26 @@ class SubtitleEntry {
   /// 图形字幕（PGS/VobSub），libass 不能改字体样式。
   final bool image;
 
+  /// 强制字幕（只翻译外语对白），自动选择时跳过。
+  final bool forced;
+
   bool get isEmbedded => kind == SubtitleEntryKind.embedded;
 
   bool get isExternal => kind == SubtitleEntryKind.external;
+
+  SubtitleEntry copyWith({bool? image, bool? forced, String? title}) {
+    return SubtitleEntry(
+      id: id,
+      title: title ?? this.title,
+      kind: kind,
+      rawTitle: rawTitle,
+      language: language,
+      codec: codec,
+      uri: uri,
+      image: image ?? this.image,
+      forced: forced ?? this.forced,
+    );
+  }
 
   SubtitleTrack toTrack() {
     if (isExternal) {
@@ -117,6 +135,20 @@ const Map<String, String> _languageLabels = {
   'en': '英语',
   'kor': '韩语',
   'ko': '韩语',
+  'ita': '意大利语',
+  'it': '意大利语',
+  'fre': '法语',
+  'fra': '法语',
+  'fr': '法语',
+  'ger': '德语',
+  'deu': '德语',
+  'de': '德语',
+  'spa': '西班牙语',
+  'es': '西班牙语',
+  'rus': '俄语',
+  'ru': '俄语',
+  'por': '葡萄牙语',
+  'pt': '葡萄牙语',
   'und': '未知',
   'mul': '多语言',
 };

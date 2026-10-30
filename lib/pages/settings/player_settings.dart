@@ -12,6 +12,7 @@ import 'package:kazumi/bean/settings/settings_dropdown_tile.dart';
 import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
 import 'package:kazumi/pages/settings/low_memory_mode_settings.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_font_service.dart';
+import 'package:kazumi/services/player/track_memory.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
@@ -48,6 +49,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late bool autoSelectSubtitle;
   late String subtitleRenderMode;
   late String autoSelectAudioTrack;
+  late bool rememberTrackSelection;
   late int playerButtonSkipTime;
   late int playerArrowKeySkipTime;
   late int playerLogLevel;
@@ -92,6 +94,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
         GStorage.getSetting<String>(SettingsKeys.subtitleRenderMode);
     autoSelectAudioTrack =
         GStorage.getSetting<String>(SettingsKeys.autoSelectAudioTrack);
+    rememberTrackSelection =
+        GStorage.getSetting<bool>(SettingsKeys.rememberTrackSelection);
 
     playerButtonSkipTime =
         GStorage.getSetting<int>(SettingsKeys.buttonSkipTime);
@@ -351,7 +355,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   setState(() {});
                 },
                 title: Text('自动选择中文字幕'),
-                description: Text('开播时简体优先，没有简体用繁体，都没有就用文件默认字幕'),
+                description: Text(
+                    '开播时优先用外挂字幕：简体 → 繁体；候选里没有中文就按名称取第一条外挂，不再退回内封'),
                 initialValue: autoSelectSubtitle,
               ),
               SettingsDropdownTile<String>(
@@ -374,9 +379,11 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
               SettingsDropdownTile<String>(
                 leading: Icons.audiotrack_rounded,
                 title: const Text('自动选择音轨'),
-                description: const Text('多音轨时按语言优先挑选；「跟随文件默认」按文件里的 default 标记'),
+                description: const Text(
+                    '「按作品语言」用 bgm 元信息判断原声语言（真人影视）或日语/国产（动画），取不到再看文件名标签'),
                 value: autoSelectAudioTrack,
                 options: const {
+                  'meta': '按作品语言（推荐）',
                   'auto': '跟随文件默认',
                   'jpn': '日语优先',
                   'chi': '中文优先',
@@ -389,6 +396,22 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   if (mounted) setState(() {});
                   KazumiDialog.showToast(message: '下一集开始生效');
                 },
+              ),
+              SettingsTile.switchTile(
+                leading: Icons.bookmark_added_rounded,
+                onToggle: (value) async {
+                  rememberTrackSelection = value ?? !rememberTrackSelection;
+                  await GStorage.putSetting<bool>(
+                      SettingsKeys.rememberTrackSelection,
+                      rememberTrackSelection);
+                  if (!rememberTrackSelection) {
+                    await TrackMemoryStore.instance.clearAll();
+                  }
+                  if (mounted) setState(() {});
+                },
+                title: Text('记住每集的字幕/音轨选择'),
+                description: Text('只记当前这一个视频；换集不沿用。关闭会清空已记住的选择'),
+                initialValue: rememberTrackSelection,
               ),
               SettingsTile(
                 leading: Icons.font_download_rounded,

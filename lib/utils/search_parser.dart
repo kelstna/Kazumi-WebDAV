@@ -73,11 +73,29 @@ class SearchDoubleRange {
 }
 
 class SearchFilterState {
+  /// 搜索范围：番剧（动画）/ 三次元（电影、剧集）/ 全部条目。
+  static const String subjectTypeAnime = 'anime';
+  static const String subjectTypeReal = 'real';
+  static const String subjectTypeAll = 'all';
+
+  static const List<String> subjectTypes = [
+    subjectTypeAnime,
+    subjectTypeReal,
+    subjectTypeAll,
+  ];
+
+  /// Bangumi subject type：2 = 动画，6 = 三次元。
+  /// 1/3/4 为书籍、音乐、游戏，只在「全部」里带上。
+  static const List<int> animeBangumiTypes = [2];
+  static const List<int> realBangumiTypes = [6];
+  static const List<int> allBangumiTypes = [1, 2, 3, 4, 6];
+
   final String id;
   final String keyword;
   final List<String> tags;
   final String sort;
   final String season;
+  final String subjectType;
   final SearchDateRange? dateRange;
   final SearchIntRange? rankRange;
   final SearchDoubleRange? scoreRange;
@@ -89,6 +107,7 @@ class SearchFilterState {
     this.tags = const [],
     this.sort = 'heat',
     this.season = '',
+    this.subjectType = subjectTypeAnime,
     this.dateRange,
     this.rankRange,
     this.scoreRange,
@@ -96,6 +115,20 @@ class SearchFilterState {
   });
 
   bool get isIdSearch => id.isNotEmpty;
+
+  bool get isAnimeScope => subjectType == subjectTypeAnime;
+
+  List<int> get bangumiSubjectTypes => switch (subjectType) {
+        subjectTypeReal => realBangumiTypes,
+        subjectTypeAll => allBangumiTypes,
+        _ => animeBangumiTypes,
+      };
+
+  String get subjectTypeLabel => switch (subjectType) {
+        subjectTypeReal => '三次元',
+        subjectTypeAll => '全部条目',
+        _ => '番剧',
+      };
 
   bool get hasAdvancedFilters =>
       tags.isNotEmpty ||
@@ -118,6 +151,7 @@ class SearchFilterState {
     List<String>? tags,
     String? sort,
     Object? season = _unchanged,
+    String? subjectType,
     Object? dateRange = _unchanged,
     Object? rankRange = _unchanged,
     Object? scoreRange = _unchanged,
@@ -129,6 +163,7 @@ class SearchFilterState {
       tags: tags ?? this.tags,
       sort: sort ?? this.sort,
       season: identical(season, _unchanged) ? this.season : season as String,
+      subjectType: subjectType ?? this.subjectType,
       dateRange: identical(dateRange, _unchanged)
           ? this.dateRange
           : dateRange as SearchDateRange?,
@@ -147,11 +182,15 @@ class SearchParser {
   final String query;
 
   static const String _fieldNames =
-      'id|tag|sort|season|date|rank|score|weekday|nsfw';
+      'id|tag|sort|season|date|rank|score|weekday|nsfw|type';
 
   final RegExp _idRegExp = RegExp(r'id:(\d+)', caseSensitive: false);
+  final RegExp _typeRegExp = RegExp(
+    r'type:(anime|real|all)',
+    caseSensitive: false,
+  );
   final RegExp _tagRegExp = RegExp(
-    r'(?:^|\s)tag:([^\s]+?)(?=(?:id|tag|sort|season|date|rank|score|weekday|nsfw):|\s|$)',
+    r'(?:^|\s)tag:([^\s]+?)(?=(?:id|tag|sort|season|date|rank|score|weekday|nsfw|type):|\s|$)',
     caseSensitive: false,
   );
   final RegExp _sortRegExp = RegExp(r'sort:([\w\-]+)', caseSensitive: false);
@@ -195,6 +234,15 @@ class SearchParser {
   String? parseSort() {
     final match = _sortRegExp.firstMatch(query);
     return match?.group(1);
+  }
+
+  String? parseSubjectType() {
+    final match = _typeRegExp.firstMatch(query);
+    final value = match?.group(1)?.toLowerCase();
+    if (value == null || !SearchFilterState.subjectTypes.contains(value)) {
+      return null;
+    }
+    return value;
   }
 
   String? parseSeason() {
@@ -254,6 +302,7 @@ class SearchParser {
       tags: parseTags(),
       sort: parseSort() ?? 'heat',
       season: parseSeason() ?? '',
+      subjectType: parseSubjectType() ?? SearchFilterState.subjectTypeAnime,
       dateRange: parseDateRange(),
       rankRange: parseRankRange(),
       scoreRange: parseScoreRange(),
@@ -261,7 +310,10 @@ class SearchParser {
     );
   }
 
-  static String fromFilterState(SearchFilterState state) {
+  static String fromFilterState(
+    SearchFilterState state, {
+    bool includeSubjectType = true,
+  }) {
     if (state.id.isNotEmpty) {
       return 'id:${state.id}';
     }
@@ -269,6 +321,10 @@ class SearchParser {
     final tokens = <String>[];
     final keyword = state.keyword.trim();
     if (keyword.isNotEmpty) tokens.add(keyword);
+    if (includeSubjectType &&
+        state.subjectType != SearchFilterState.subjectTypeAnime) {
+      tokens.add('type:${state.subjectType}');
+    }
     for (final tag in state.tags) {
       final normalized = tag.trim();
       if (normalized.isNotEmpty) tokens.add('tag:$normalized');

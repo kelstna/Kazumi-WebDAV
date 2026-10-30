@@ -207,6 +207,34 @@ final List<String> defaultAnimeTags = const [
   '异世界',
 ];
 
+/// 三次元条目常用的筛选标签（Bangumi 三次元 tag）。
+final List<String> defaultRealTags = const [
+  '电影',
+  '剧集',
+  '日剧',
+  '美剧',
+  '英剧',
+  '韩剧',
+  '国产剧',
+  '纪录片',
+  '剧情',
+  '喜剧',
+  '爱情',
+  '动作',
+  '犯罪',
+  '悬疑',
+  '科幻',
+  '恐怖',
+  '战争',
+  '历史',
+  '音乐',
+];
+
+final List<String> defaultAnimeAndRealTags = [
+  ...defaultAnimeTags,
+  ...defaultRealTags,
+];
+
 // 播放器默认快捷键
 final Map<String, List<String>> defaultShortcuts = const {
   'playorpause': [' '],

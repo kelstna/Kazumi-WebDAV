@@ -103,6 +103,7 @@ abstract class _SearchPageController with Store {
     do {
       final page = await BangumiApi.bangumiSearch(filterState.keyword,
           tags: filterState.tags,
+          subjectTypes: filterState.bangumiSubjectTypes,
           limit: _searchPageSize,
           offset: _searchOffset,
           sort: filterState.sort,

@@ -682,9 +682,19 @@ class WebDavFontService {
     OpenListEntry entry,
     http.Client client,
   ) async {
-    final bytes = await _readHeaderBytes(entry.path, client);
+    var bytes = await _readHeaderBytes(entry.path, client);
     if (bytes == null || bytes.isEmpty) {
       return null;
+    }
+    // 部分 TTC/OTF 把 name 表放在文件末尾（例如 DFMaruGothic 在 3.5MB 处），
+    // 只读前 256KB 拿不到字体名，需要再补读一次到 name 表末尾。
+    final nameEnd = _requiredNameEnd(bytes);
+    if (nameEnd > bytes.length) {
+      final extended =
+          await _readBytesUpTo(entry.path, client, nameEnd, entry.size);
+      if (extended != null && extended.length > bytes.length) {
+        bytes = extended;
+      }
     }
     return <String, Object>{
       'name': entry.name,
@@ -693,6 +703,93 @@ class WebDavFontService {
       'modified': entry.modified,
       'bytes': bytes,
     };
+  }
+
+  Future<Uint8List?> _readBytesUpTo(
+    String path,
+    http.Client client,
+    int end,
+    int fileSize,
+  ) async {
+    final cap = end.clamp(0, 32 * 1024 * 1024);
+    if (cap <= 0) {
+      return null;
+    }
+    try {
+      final request = http.Request('GET', OpenListService.instance.uriFor(path));
+      request.headers.addAll(OpenListService.instance.authHeaders);
+      request.headers['Range'] = 'bytes=0-${cap - 1}';
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200 && response.statusCode != 206) {
+        return null;
+      }
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in response.stream) {
+        builder.add(chunk);
+        if (builder.length >= cap) {
+          break;
+        }
+      }
+      final bytes = builder.takeBytes();
+      return bytes.length > cap ? Uint8List.sublistView(bytes, 0, cap) : bytes;
+    } catch (error) {
+      KazumiLogger()
+          .w('WebDavFontService: failed to read full header of $path', error: error);
+      return null;
+    }
+  }
+
+  /// name 表在文件里的最大结束位置；解析失败返回 0。
+  int _requiredNameEnd(Uint8List data) {
+    if (data.length < 12) {
+      return 0;
+    }
+    final tag = String.fromCharCodes(data.sublist(0, 4));
+    var end = 0;
+    if (tag == 'ttcf') {
+      final count = _byteU32(data, 8);
+      if (count <= 0 || count > 64 || data.length < 12 + 4 * count) {
+        return 0;
+      }
+      for (var i = 0; i < count; i++) {
+        final faceEnd = _faceNameEnd(data, _byteU32(data, 12 + 4 * i));
+        if (faceEnd > end) {
+          end = faceEnd;
+        }
+      }
+    } else {
+      end = _faceNameEnd(data, 0);
+    }
+    return end;
+  }
+
+  int _faceNameEnd(Uint8List data, int base) {
+    if (data.length < base + 12) {
+      return 0;
+    }
+    final numTables = _byteU16(data, base + 4);
+    if (numTables <= 0 || numTables > 512) {
+      return 0;
+    }
+    final directoryEnd = base + 12 + 16 * numTables;
+    if (data.length < directoryEnd) {
+      return 0;
+    }
+    for (var i = 0; i < numTables; i++) {
+      final record = base + 12 + 16 * i;
+      final tag = String.fromCharCodes(data.sublist(record, record + 4));
+      if (tag == 'name') {
+        final offset = _byteU32(data, record + 8);
+        final length = _byteU32(data, record + 12);
+        if (offset <= 0 || length <= 0 || length > 2 * 1024 * 1024) {
+          return 0;
+        }
+        return offset + length;
+      }
+    }
+    return 0;
   }
 
   Future<Uint8List?> _readHeaderBytes(String path, http.Client client) async {
@@ -734,11 +831,11 @@ class WebDavFontService {
 
   Future<List<String>> _readLocalFontNames(String path) async {
     try {
-      final bytes = await File(path).openRead(0, 262144).fold<BytesBuilder>(
-            BytesBuilder(copy: false),
-            (builder, chunk) => builder..add(chunk),
-          );
-      return _namesFromBytes(bytes.takeBytes());
+      final file = File(path);
+      if (await file.length() > 32 * 1024 * 1024) {
+        return const [];
+      }
+      return _namesFromBytes(await file.readAsBytes());
     } catch (error) {
       KazumiLogger().w(
         'WebDavFontService: failed to read local font $path',

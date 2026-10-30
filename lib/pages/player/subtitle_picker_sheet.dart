@@ -260,6 +260,24 @@ class _SubtitlePickerSheetState extends State<_SubtitlePickerSheet> {
           onPressed: controller.delayMs == 0 ? null : () => controller.setDelay(0),
           child: const Text('重置延迟'),
         ),
+        if (controller.hasRememberedSelection) ...[
+          const Divider(height: 20),
+          Row(
+            children: [
+              Icon(Icons.bookmark_added_rounded,
+                  size: 16, color: colors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('已记住本集字幕',
+                    style: theme.textTheme.labelMedium),
+              ),
+              TextButton(
+                onPressed: controller.clearRememberedSelection,
+                child: const Text('清除'),
+              ),
+            ],
+          ),
+        ],
         if (!_libassMode) ...[
           const Divider(height: 20),
           Text(

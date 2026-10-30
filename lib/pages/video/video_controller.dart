@@ -21,6 +21,7 @@ import 'package:kazumi/modules/bangumi/episode_item.dart';
 import 'package:kazumi/modules/comments/comment_item.dart';
 import 'package:kazumi/modules/comments/comment_response.dart';
 import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:kazumi/services/bangumi/subject_language.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/episode_url.dart';
 import 'package:kazumi/utils/http_headers.dart';
@@ -541,11 +542,13 @@ abstract class _VideoPageController with Store implements Disposable {
       coverUrl: bangumiItem.images['large'],
       bangumiName:
           bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
+      expectedAudioLanguage: _expectedAudioLanguage(),
     );
 
     final initialized = await playerController.init(params);
     if (session.isActive && initialized) {
       playingEpisode = selection;
+      unawaited(_refreshSubjectLanguage(playerController));
       unawaited(_loadPlaybackDanmaku(playerController, params, session));
     } else if (session.isActive) {
       _playbackSessions.cancel();
@@ -587,6 +590,35 @@ abstract class _VideoPageController with Store implements Disposable {
       }
       KazumiLogger().w('VideoPageController: failed to load danmaku', error: e);
     }
+  }
+
+  /// 作品原声语言：动画可以直接从条目类型/标签推断，真人影视要查 bgm。
+  String? _expectedAudioLanguage() {
+    if (GStorage.getSetting<String>(SettingsKeys.autoSelectAudioTrack) !=
+        'meta') {
+      return null;
+    }
+    return SubjectLanguageService.instance.localLanguageFor(bangumiItem);
+  }
+
+  /// 真人影视的语言在 bgm 条目详情里，异步取到后补一次自动选轨。
+  Future<void> _refreshSubjectLanguage(PlayerController playerController) async {
+    if (GStorage.getSetting<String>(SettingsKeys.autoSelectAudioTrack) !=
+        'meta') {
+      return;
+    }
+    if (SubjectLanguageService.instance.localLanguageFor(bangumiItem) != null) {
+      return;
+    }
+    final code = await SubjectLanguageService.instance.resolve(
+      bangumiItem.id,
+      type: bangumiItem.type,
+      tags: bangumiItem.tags.map((tag) => tag.name),
+    );
+    if (code == null || code.isEmpty) {
+      return;
+    }
+    playerController.audioTrack.applyExpectedLanguage(code);
   }
 
   void cancelAutomaticDanmakuLoad() {
@@ -637,6 +669,7 @@ abstract class _VideoPageController with Store implements Disposable {
       bangumiName: bangumiItem.nameCn.isNotEmpty
           ? bangumiItem.nameCn
           : bangumiItem.name,
+      expectedAudioLanguage: _expectedAudioLanguage(),
     );
 
     final initialized = await playerController.init(params);
@@ -645,6 +678,7 @@ abstract class _VideoPageController with Store implements Disposable {
         episode: resolvedEpisode.listIndex,
         road: resolvedEpisode.roadIndex,
       );
+      unawaited(_refreshSubjectLanguage(playerController));
       unawaited(_loadPlaybackDanmaku(playerController, params, session));
     } else if (session.isActive) {
       _playbackSessions.cancel();
@@ -710,6 +744,7 @@ abstract class _VideoPageController with Store implements Disposable {
         bangumiName: bangumiItem.nameCn.isNotEmpty
             ? bangumiItem.nameCn
             : bangumiItem.name,
+        expectedAudioLanguage: _expectedAudioLanguage(),
       );
 
       final initialized = await playerController.init(params);

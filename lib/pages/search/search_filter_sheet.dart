@@ -173,6 +173,12 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
             borderSide: BorderSide.none),
       );
 
+  List<String> get _tagSuggestions => switch (_draft.subjectType) {
+        SearchFilterState.subjectTypeReal => defaultRealTags,
+        SearchFilterState.subjectTypeAll => defaultAnimeAndRealTags,
+        _ => defaultAnimeTags,
+      };
+
   void _apply() => Navigator.pop(
       context,
       _SearchFilterResult(
@@ -197,7 +203,7 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
         return Column(mainAxisSize: MainAxisSize.min, children: [
           if (!shortWindow)
             MaterialBottomSheetHeader(
-                title: '筛选番剧', onClose: () => Navigator.pop(context)),
+                title: '筛选条目', onClose: () => Navigator.pop(context)),
           Flexible(
               child: ListView(
             shrinkWrap: true,
@@ -207,13 +213,35 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
               if (_draft.isIdSearch)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('当前按编号定位番剧'),
+                  title: const Text('当前按编号定位条目'),
                   subtitle: const Text('清除编号后，可以组合其他条件查找。'),
                   trailing: TextButton(
                       onPressed: () =>
                           setState(() => _draft = _draft.copyWith(id: '')),
                       child: const Text('清除编号')),
                 ),
+              DropdownButtonFormField<String>(
+                key: ValueKey('type-${_draft.subjectType}'),
+                initialValue: _draft.subjectType,
+                isExpanded: true,
+                decoration: _fieldDecoration('条目类型'),
+                items: const [
+                  DropdownMenuItem(
+                      value: SearchFilterState.subjectTypeAnime,
+                      child: Text('番剧（动画）')),
+                  DropdownMenuItem(
+                      value: SearchFilterState.subjectTypeReal,
+                      child: Text('三次元（电影 / 剧集）')),
+                  DropdownMenuItem(
+                      value: SearchFilterState.subjectTypeAll,
+                      child: Text('全部条目')),
+                ],
+                onChanged: (value) => setState(() => _draft =
+                    _draft.copyWith(
+                        subjectType:
+                            value ?? SearchFilterState.subjectTypeAnime)),
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 key: ValueKey('sort-${_draft.sort}'),
                 initialValue: _draft.sort,
@@ -236,7 +264,7 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
                   Align(
                       alignment: Alignment.centerLeft,
                       child: Wrap(spacing: 8, runSpacing: 4, children: [
-                        for (final tag in {...defaultAnimeTags, ..._draft.tags})
+                        for (final tag in {..._tagSuggestions, ..._draft.tags})
                           FilterChip(
                             label: Text(tag),
                             selected: _draft.tags.contains(tag),
@@ -378,13 +406,13 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
                 children: [
                   SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('隐藏看过的番剧'),
+                      title: const Text('隐藏看过的条目'),
                       value: _notShowWatched,
                       onChanged: (value) =>
                           setState(() => _notShowWatched = value)),
                   SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('隐藏抛弃的番剧'),
+                      title: const Text('隐藏抛弃的条目'),
                       value: _notShowAbandoned,
                       onChanged: (value) =>
                           setState(() => _notShowAbandoned = value)),

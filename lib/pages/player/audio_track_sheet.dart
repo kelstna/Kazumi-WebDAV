@@ -94,6 +94,25 @@ class _AudioTrackPickerSheet extends StatelessWidget {
                 ],
               ),
             ),
+            if (controller.hasRememberedSelection)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.bookmark_added_rounded,
+                        size: 16, color: colors.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text('已记住本集音轨',
+                          style: theme.textTheme.labelMedium),
+                    ),
+                    TextButton(
+                      onPressed: controller.clearRememberedSelection,
+                      child: const Text('清除'),
+                    ),
+                  ],
+                ),
+              ),
           ],
         );
       },

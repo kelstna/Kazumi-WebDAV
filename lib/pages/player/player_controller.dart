@@ -236,7 +236,11 @@ class PlayerController implements Disposable {
       isLocalPlayback: params.isLocalPlayback,
       headers: params.httpHeaders,
     );
-    await audioTrack.attach(player);
+    await audioTrack.attach(
+      player,
+      videoUrl: params.videoUrl,
+      expectedLanguage: params.expectedAudioLanguage,
+    );
     if (!_ownsInitialization(initialization, player)) {
       return false;
     }

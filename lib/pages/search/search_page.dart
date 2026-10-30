@@ -39,6 +39,7 @@ class _SearchPageState extends State<SearchPage> {
   // Preserve the input subtree when the header moves in or out of the scroll view.
   final _searchHeaderKey = GlobalKey();
   String? _submittedQuery;
+  String _scope = SearchFilterState.subjectTypeAnime;
   bool _managingHistory = false;
 
   SearchPageController get _controller => widget.controller;
@@ -47,13 +48,20 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    final storedScope = GStorage.getSetting(SettingsKeys.searchSubjectType);
+    if (SearchFilterState.subjectTypes.contains(storedScope)) {
+      _scope = storedScope;
+    }
     _scroll.addListener(_loadMoreOnScroll);
     _controller.loadSearchHistories();
     if (widget.inputTag.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _applyFilters(
-            SearchFilterState(tags: [Uri.decodeComponent(widget.inputTag)]));
+        _applyFilters(SearchFilterState(
+          tags: [Uri.decodeComponent(widget.inputTag)],
+          // 标签入口来自番剧榜单，始终按番剧检索。
+          subjectType: SearchFilterState.subjectTypeAnime,
+        ));
       });
     }
   }
@@ -73,19 +81,46 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Future<void> _submit(String value) async {
-    final filters = SearchParser(value).toFilterState();
-    final query = SearchParser.fromFilterState(filters);
+  Future<void> _submit(String value, {String? scopeOverride}) async {
+    final parser = SearchParser(value);
+    final filters = parser.toFilterState();
+    final scope = scopeOverride ?? parser.parseSubjectType() ?? _scope;
+    final normalized = filters.copyWith(subjectType: scope);
+    final query = SearchParser.fromFilterState(normalized);
+    final inputText = SearchParser.fromFilterState(
+      normalized,
+      includeSubjectType: false,
+    );
     _inputFocus.unfocus();
-    _writeInput(query);
-    setState(() => _submittedQuery = query);
+    _writeInput(inputText);
+    setState(() {
+      _scope = scope;
+      _submittedQuery = query;
+    });
+    await GStorage.putSetting(SettingsKeys.searchSubjectType, scope);
     final request = _controller.searchBangumi(query, type: 'init');
     if (_scroll.hasClients) _scroll.jumpTo(0);
     await request;
   }
 
-  Future<void> _applyFilters(SearchFilterState filters) =>
-      _submit(SearchParser.fromFilterState(filters));
+  Future<void> _applyFilters(SearchFilterState filters) => _submit(
+        SearchParser.fromFilterState(filters),
+        scopeOverride: filters.subjectType,
+      );
+
+  Future<void> _changeScope(String scope) async {
+    if (scope == _scope) return;
+    final query = _submittedQuery;
+    setState(() => _scope = scope);
+    await GStorage.putSetting(SettingsKeys.searchSubjectType, scope);
+    if (query == null) return;
+    final filters =
+        SearchParser(query).toFilterState().copyWith(subjectType: scope);
+    await _submit(
+      SearchParser.fromFilterState(filters),
+      scopeOverride: scope,
+    );
+  }
 
   void _loadMoreOnScroll() {
     if (!_scroll.hasClients || _scroll.position.extentAfter > 360) return;
@@ -103,7 +138,9 @@ class _SearchPageState extends State<SearchPage> {
       context: context,
       maxHeightFactor: 0.9,
       builder: (_) => _SearchFilterSheet(
-        initialState: SearchParser(_input.text).toFilterState(),
+        initialState: SearchParser(_input.text)
+            .toFilterState()
+            .copyWith(subjectType: _scope),
         initialNotShowWatched: _controller.notShowWatchedBangumis,
         initialNotShowAbandoned: _controller.notShowAbandonedBangumis,
       ),
@@ -119,7 +156,8 @@ class _SearchPageState extends State<SearchPage> {
     _inputFocus.unfocus();
     final result = await context.pushNamed('/search/image');
     if (!mounted || result is! String || result.isEmpty) return;
-    await _submit(result);
+    // 以图搜番只返回动画条目。
+    await _submit(result, scopeOverride: SearchFilterState.subjectTypeAnime);
   }
 
   void _clearSearch() {
@@ -139,7 +177,7 @@ class _SearchPageState extends State<SearchPage> {
       builder: (context, value, child) => SearchBar(
         controller: _input,
         focusNode: _inputFocus,
-        hintText: '搜索番剧名称',
+        hintText: '搜索番剧、电影或剧集',
         textInputAction: TextInputAction.search,
         constraints: const BoxConstraints(minHeight: 64),
         elevation: const WidgetStatePropertyAll(0),
@@ -168,10 +206,50 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  Widget _scopeSelector() {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(
+            value: SearchFilterState.subjectTypeAnime,
+            label: Text('番剧'),
+          ),
+          ButtonSegment(
+            value: SearchFilterState.subjectTypeReal,
+            label: Text('三次元'),
+          ),
+          ButtonSegment(
+            value: SearchFilterState.subjectTypeAll,
+            label: Text('全部'),
+          ),
+        ],
+        selected: {_scope},
+        showSelectedIcon: false,
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          textStyle: WidgetStatePropertyAll(theme.textTheme.labelLarge),
+          side: WidgetStatePropertyAll(
+            BorderSide(color: theme.colorScheme.outlineVariant),
+          ),
+        ),
+        onSelectionChanged: (values) => _changeScope(values.first),
+      ),
+    );
+  }
+
   Widget _header() => Padding(
         key: _searchHeaderKey,
         padding: EdgeInsets.only(top: _hasSearched ? 8 : 24, bottom: 16),
-        child: _searchField(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _searchField(),
+            const SizedBox(height: 12),
+            _scopeSelector(),
+          ],
+        ),
       );
 
   Widget _discovery() {
@@ -186,7 +264,7 @@ class _SearchPageState extends State<SearchPage> {
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             leading: const Icon(Icons.tune_rounded),
             title: const Text('按条件查找'),
-            subtitle: const Text('题材、放送时间与评分'),
+            subtitle: const Text('条目类型、题材、时间与评分'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: _showFilters,
           )),
@@ -281,7 +359,7 @@ class _SearchPageState extends State<SearchPage> {
                   onChanged: (sort) =>
                       _applyFilters(submitted.copyWith(sort: sort))),
             IconButton(
-              tooltip: '筛选番剧',
+              tooltip: '筛选条件',
               onPressed: _showFilters,
               icon: Badge(
                   backgroundColor: Theme.of(context).colorScheme.primary,
@@ -295,7 +373,7 @@ class _SearchPageState extends State<SearchPage> {
           Text(
               busy
                   ? '正在搜索…'
-                  : '${items.length} 部番剧${items.length < allItems.length ? ' · 隐藏 ${allItems.length - items.length} 部' : ''}',
+                  : '${items.length} 个条目${items.length < allItems.length ? ' · 隐藏 ${allItems.length - items.length} 个' : ''}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant)),
           if (summary.isNotEmpty) ...[
@@ -314,14 +392,14 @@ class _SearchPageState extends State<SearchPage> {
         const SliverToBoxAdapter(
           child: GeneralEmptyState(
             icon: Icons.search_off_rounded,
-            title: '没有找到番剧',
+            title: '没有找到条目',
           ),
         )
       else if (items.isEmpty)
         SliverToBoxAdapter(
             child: GeneralEmptyState(
           icon: Icons.filter_alt_off_rounded,
-          title: '这些番剧被筛选隐藏了',
+          title: '这些条目被筛选隐藏了',
           actions: [
             StateActionButton.tonal(
               onPressed: () async {
@@ -369,7 +447,7 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const SysAppBar(
-          backgroundColor: Colors.transparent, title: Text('番剧搜索')),
+          backgroundColor: Colors.transparent, title: Text('搜索番剧 / 影视')),
       body: SafeArea(
           top: false,
           child: LayoutBuilder(builder: (context, constraints) {

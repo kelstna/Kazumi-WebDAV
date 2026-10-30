@@ -591,11 +591,33 @@ class SettingsKeys {
   );
 
   /// 开播时自动选音轨：
+  /// * `meta` — 按作品原声语言（bgm 元信息 → 文件名标签 → 文件默认）；
   /// * `auto` — 跟随文件 default 标记（mpv 默认行为）；
   /// * `jpn` / `chi` / `eng` — 优先对应语言，找不到再跟随默认。
   static const autoSelectAudioTrack = SettingKey<String>(
     'autoSelectAudioTrack',
-    'auto',
+    'meta',
+    group: SettingGroup.player,
+  );
+
+  /// 记住每个视频手动选择的字幕/音轨（只记单集，不跨集沿用）。
+  static const rememberTrackSelection = SettingKey<bool>(
+    'rememberTrackSelection',
+    true,
+    group: SettingGroup.player,
+  );
+
+  /// 单集字幕/音轨选择的持久化数据（JSON）。
+  static const trackMemory = SettingKey<String>(
+    'trackMemory',
+    '{}',
+    group: SettingGroup.player,
+  );
+
+  /// bgm 作品语言缓存（JSON，30 天）。
+  static const subjectLanguageCache = SettingKey<String>(
+    'subjectLanguageCache',
+    '{}',
     group: SettingGroup.player,
   );
 
@@ -648,6 +670,13 @@ class SettingsKeys {
     'openListSourceIndex',
     0,
     group: SettingGroup.player,
+  );
+
+  /// 搜索页上次选择的条目类型：anime（番剧）/ real（三次元）/ all（全部）。
+  static const searchSubjectType = SettingKey<String>(
+    'searchSubjectType',
+    'anime',
+    group: SettingGroup.interface,
   );
 
   static final List<SettingKey<Object?>> all = [
@@ -766,6 +795,7 @@ class SettingsKeys {
     openListPassword,
     openListIgnoredDirs,
     openListSourceIndex,
+    searchSubjectType,
   ];
 
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {

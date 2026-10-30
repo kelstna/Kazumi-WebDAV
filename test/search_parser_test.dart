@@ -78,5 +78,38 @@ void main() {
         '孤独摇滚 tag:音乐 tag:漫画改 sort:score season:2022Q4 rank:1..1000 score:8..10 weekday:1,6',
       );
     });
+
+    test('parses the real-action subject type', () {
+      final parser = SearchParser('蜘蛛侠 type:real');
+      final state = parser.toFilterState();
+
+      expect(parser.parseSubjectType(), 'real');
+      expect(parser.parseKeywords(), '蜘蛛侠');
+      expect(state.subjectType, SearchFilterState.subjectTypeReal);
+      expect(state.bangumiSubjectTypes, [6]);
+      expect(SearchParser.fromFilterState(state), '蜘蛛侠 type:real');
+      expect(
+        SearchParser.fromFilterState(state, includeSubjectType: false),
+        '蜘蛛侠',
+      );
+    });
+
+    test('defaults to anime when no subject type is given', () {
+      final state = SearchParser('孤独摇滚').toFilterState();
+
+      expect(state.subjectType, SearchFilterState.subjectTypeAnime);
+      expect(state.bangumiSubjectTypes, [2]);
+      expect(SearchParser.fromFilterState(state), '孤独摇滚');
+      expect(SearchParser('type:all').toFilterState().bangumiSubjectTypes,
+          containsAll([1, 2, 3, 4, 6]));
+    });
+
+    test('parses adjacent tag and subject type syntax', () {
+      final parser = SearchParser('tag:电影type:real');
+
+      expect(parser.parseTags(), ['电影']);
+      expect(parser.parseSubjectType(), 'real');
+      expect(parser.parseKeywords(), isEmpty);
+    });
   });
 }
