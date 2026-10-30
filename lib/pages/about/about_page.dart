@@ -4,6 +4,7 @@ import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/bean/widget/content_section.dart';
 import 'package:kazumi/pages/about/about_widgets.dart';
 import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:kazumi/utils/app_variant.dart';
 
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key, required this.onCheckUpdate});
@@ -121,7 +122,7 @@ class _ProjectHeader extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            ApiEndpoints.version,
+            '${ApiEndpoints.version} (${ApiEndpoints.buildNumber}) · ${AppVariant.current.label}',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colors.onSurfaceVariant,
             ),
@@ -142,7 +143,7 @@ class _ProjectHeader extends StatelessWidget {
                 style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
                 onPressed: () => openAboutLink(
                   context,
-                  '${ApiEndpoints.sourceUrl}/releases',
+                  ApiEndpoints.ownRepoReleasesUrl,
                 ),
                 child: const Text('更新日志'),
               ),

@@ -5,13 +5,11 @@ import 'package:kazumi/bean/settings/settings_list.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/bean/widget/tonal_card.dart';
 import 'package:kazumi/services/update/auto_updater.dart';
-import 'package:kazumi/services/update/update_download_source.dart';
 import 'package:kazumi/utils/date_time.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 typedef UpdateDialogChoice = ({
   InstallationType type,
-  UpdateDownloadSource source,
 });
 
 /// Pops with an [UpdateDialogChoice] when the user starts the update.
@@ -33,7 +31,6 @@ class UpdateAvailableDialog extends StatefulWidget {
 
 class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
   final _notesController = ScrollController();
-  var _source = UpdateDownloadSource.mirror;
   late var _type = widget.updateInfo.recommendedInstallationType;
   var _disableAutoUpdate = false;
 
@@ -103,7 +100,7 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
         StateActionButton(
           onPressed: () => KazumiDialog.dismiss(
             context: context,
-            popWith: (type: _type, source: _source),
+            popWith: (type: _type),
           ),
           icon: downloadInApp
               ? Icons.download_rounded
@@ -162,6 +159,21 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
                       ),
                     ),
                   ),
+                  if (info.variantLabel != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: colors.tertiaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        info.variantLabel!,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: colors.onTertiaryContainer,
+                        ),
+                      ),
+                    ),
                   if (info.publishedAt.isNotEmpty)
                     Text(
                       formatDate(info.publishedAt),
@@ -221,27 +233,19 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
 
   Widget _buildDownloadOptions() {
     final types = widget.updateInfo.availableInstallationTypes;
+    if (types.length <= 1) {
+      return const SizedBox.shrink();
+    }
     return SettingsSection(
       margin: EdgeInsets.zero,
       tiles: [
-        SettingsDropdownTile<UpdateDownloadSource>(
-          leading: Icons.cloud_download_rounded,
-          title: const Text('下载源'),
-          value: _source,
-          options: {
-            for (final source in UpdateDownloadSource.values)
-              source: source.label,
-          },
-          onChanged: (source) => setState(() => _source = source),
+        SettingsDropdownTile<InstallationType>(
+          leading: Icons.inventory_2_rounded,
+          title: const Text('安装类型'),
+          value: _type,
+          options: {for (final type in types) type: type.label},
+          onChanged: (type) => setState(() => _type = type),
         ),
-        if (types.length > 1)
-          SettingsDropdownTile<InstallationType>(
-            leading: Icons.inventory_2_rounded,
-            title: const Text('安装类型'),
-            value: _type,
-            options: {for (final type in types) type: type.label},
-            onChanged: (type) => setState(() => _type = type),
-          ),
       ],
     );
   }

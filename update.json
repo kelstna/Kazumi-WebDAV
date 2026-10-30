@@ -1,0 +1,25 @@
+{
+    "schema":  1,
+    "version":  "2.3.9",
+    "build":  20313,
+    "tag":  "v2.3.9.20313",
+    "publishedAt":  "2026-10-30T05:56:36Z",
+    "notes":  "- **检查更新改为跟随本仓库 Release**：不再提示上游 `Predidit/Kazumi` 的版本，改为读取本仓库的更新清单 `update.json`（raw → jsDelivr → github 三地址顺序回退）。\n- **按安装包型自动选包**：替换版更新替换版，共存版更新共存版，两者不会串包。\n- 关于页版本号显示 `2.3.9 (20313)`，「更新日志」指向本仓库。\n- 更新包带 SHA256 校验：下载到临时目录，哈希对上才改名生效；失败给中文原因（超时/证书/磁盘满/权限/校验不符）。",
+    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20313",
+    "assets":  [
+                   {
+                       "variant":  "replace",
+                       "file":  "Kazumi-2.3.9-20313-android-arm64.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20313/Kazumi-2.3.9-20313-android-arm64.apk",
+                       "sha256":  "d9ccef3c63a70456d13f6a0c0721d913886c6818ea5c23513b85f10e1ecb5935",
+                       "size":  33612241
+                   },
+                   {
+                       "variant":  "coexist",
+                       "file":  "Kazumi-2.3.9-20313-android-arm64-coexist.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20313/Kazumi-2.3.9-20313-android-arm64-coexist.apk",
+                       "sha256":  "fc1bd877400f04fe6fafc6a9b70df8292b2d6b47880d088e45e8143ecac4c1a6",
+                       "size":  33612065
+                   }
+               ]
+}

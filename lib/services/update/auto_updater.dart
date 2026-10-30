@@ -1,18 +1,17 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/update_available_dialog.dart';
-import 'package:kazumi/request/clients/download_http_client.dart';
 import 'package:kazumi/request/config/api_endpoints.dart';
 import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/update/update_download_source.dart';
+import 'package:kazumi/services/update/app_update_source.dart';
 import 'package:kazumi/services/update/update_downloader.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:kazumi/utils/app_variant.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/version.dart';
 
@@ -44,6 +43,12 @@ class UpdateInfo {
   final List<InstallationType> availableInstallationTypes;
   final List<dynamic> assets;
 
+  /// 清单里给出的 SHA256，下载完成后逐字节校验。
+  final String sha256;
+
+  /// 本次要装的变体（替换版 / 共存版），没有匹配到的包时为 null。
+  final String? variantLabel;
+
   UpdateInfo({
     required this.version,
     required this.description,
@@ -53,6 +58,8 @@ class UpdateInfo {
     this.installationType,
     this.availableInstallationTypes = const [],
     this.assets = const [],
+    this.sha256 = '',
+    this.variantLabel,
   });
   InstallationType get recommendedInstallationType {
     if (availableInstallationTypes.isNotEmpty) {
@@ -110,61 +117,41 @@ class AutoUpdater {
 
   AutoUpdater._internal();
 
-  final DownloadHttpClient _downloadClient = DownloadHttpClient.instance;
-
-  List<InstallationType> _detectAvailableInstallationTypes() {
-    if (Platform.isWindows) {
-      return [InstallationType.windowsMsix, InstallationType.windowsPortable];
-    }
-    if (Platform.isLinux) {
-      return [InstallationType.linuxDeb, InstallationType.linuxTar];
-    }
-    if (Platform.isMacOS) return [InstallationType.macosDmg];
-    if (Platform.isIOS) return [InstallationType.ios];
-    if (Platform.isAndroid) return [InstallationType.androidApk];
-    return [InstallationType.unknown];
-  }
-
   Future<UpdateInfo?> checkForUpdates() async {
     try {
-      final data = await _latestRelease();
+      final manifest = await AppUpdateSource().fetchManifest();
 
-      if (!data.containsKey('tag_name')) {
-        throw Exception('无效的响应数据');
+      final updated = needUpdateForRelease(
+        localVersion: ApiEndpoints.version,
+        localBuild: ApiEndpoints.buildNumber,
+        remoteVersion: manifest.version,
+        remoteBuild: manifest.build,
+      );
+      if (!updated) {
+        return null;
       }
 
-      final remoteVersion = data['tag_name'] as String;
-      final currentVersion = ApiEndpoints.version;
+      final variant = AppVariant.current;
+      final asset = manifest.assetForVariant(variant);
+      final type = asset == null
+          ? InstallationType.unknown
+          : InstallationType.androidApk;
 
-      if (needUpdate(currentVersion, remoteVersion)) {
-        final availableTypes = _detectAvailableInstallationTypes();
-
-        return UpdateInfo(
-          version: remoteVersion,
-          description: data['body'] ?? '发现新版本',
-          downloadUrl: '',
-          releaseNotes: data['html_url'] ?? '',
-          publishedAt: data['published_at'] ?? '',
-          installationType: availableTypes.first,
-          availableInstallationTypes: availableTypes,
-          assets: data['assets'] ?? [],
-        );
-      }
-
-      return null;
+      return UpdateInfo(
+        version: manifest.displayVersion,
+        description: manifest.notes,
+        downloadUrl: asset?.url ?? '',
+        releaseNotes: manifest.releaseUrl,
+        publishedAt: manifest.publishedAt,
+        installationType: type,
+        availableInstallationTypes: [type],
+        sha256: asset?.sha256 ?? '',
+        variantLabel: asset == null ? null : variant.label,
+      );
     } catch (e) {
       KazumiLogger().e('Update: check for updates failed', error: e);
       rethrow;
     }
-  }
-
-  Future<Map<String, dynamic>> _latestRelease() async {
-    final raw = await _downloadClient.getPlain(ApiEndpoints.latestAppMirror);
-    final data = json.decode(raw);
-    if (data is! Map) {
-      throw Exception('Invalid update response');
-    }
-    return Map<String, dynamic>.from(data);
   }
 
   Future<void> autoCheckForUpdates() async {
@@ -209,43 +196,25 @@ class AutoUpdater {
       KazumiDialog.showToast(message: '已关闭自动更新');
     }
     if (choice != null) {
-      _downloadUpdateWithType(updateInfo, choice.type, choice.source);
+      await _startUpdate(updateInfo);
     }
   }
 
-  Future<void> _downloadUpdateWithType(
-      UpdateInfo updateInfo, InstallationType selectedType,
-      UpdateDownloadSource source) async {
+  /// 清单里没有当前变体的安装包时，退回 Release 页面。
+  Future<void> _startUpdate(UpdateInfo updateInfo) async {
     try {
-      if (!selectedType.downloadsInApp) {
-        String releaseUrl = updateInfo.releaseNotes;
-        if (releaseUrl.isEmpty) {
-          releaseUrl = ApiEndpoints.latestApp;
-        }
-        launchUrl(Uri.parse(releaseUrl), mode: LaunchMode.externalApplication);
+      final downloadInApp =
+          updateInfo.recommendedInstallationType.downloadsInApp;
+      if (!downloadInApp || updateInfo.downloadUrl.isEmpty) {
+        final releaseUrl = updateInfo.releaseNotes.isNotEmpty
+            ? updateInfo.releaseNotes
+            : ApiEndpoints.ownRepoReleasesUrl;
+        await launchUrl(Uri.parse(releaseUrl),
+            mode: LaunchMode.externalApplication);
         return;
       }
 
-      final asset = getUpdateAssetForType(updateInfo.assets, selectedType);
-      final downloadUrl = getUpdateDownloadUrlFromAsset(asset, source);
-      if (asset == null || downloadUrl.isEmpty) {
-        KazumiDialog.showToast(message: '没有找到 ${selectedType.label} 的下载链接');
-        return;
-      }
-
-      final expectedHash = getUpdateFileHashFromAsset(asset);
-      final downloadInfo = UpdateInfo(
-        version: updateInfo.version,
-        description: updateInfo.description,
-        downloadUrl: downloadUrl,
-        releaseNotes: updateInfo.releaseNotes,
-        publishedAt: updateInfo.publishedAt,
-        installationType: selectedType,
-        availableInstallationTypes: [selectedType],
-        assets: updateInfo.assets,
-      );
-
-      _downloadUpdate(downloadInfo, expectedHash);
+      await _downloadUpdate(updateInfo, updateInfo.sha256);
     } catch (e) {
       KazumiDialog.showToast(message: '下载失败: ${e.toString()}');
       KazumiLogger().e('Update: download update failed', error: e);

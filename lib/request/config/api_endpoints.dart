@@ -1,8 +1,27 @@
-import 'package:flutter/services.dart' show appBuildName;
+import 'package:flutter/services.dart' show appBuildName, appBuildNumber;
 
 class ApiEndpoints {
   /// 当前版本
   static const String version = appBuildName ?? '0.0.0';
+
+  /// 当前构建号（pubspec `version:` 里 `+` 后面的部分）
+  static final int buildNumber = int.tryParse(appBuildNumber ?? '') ?? 0;
+
+  /// 本仓库（修改版自己发布 APK 的地方）
+  static const String ownRepoUrl = 'https://github.com/kelstna/Kazumi-WebDAV';
+
+  /// 本仓库 Release 页面
+  static const String ownRepoReleasesUrl = '$ownRepoUrl/releases';
+
+  /// 应用更新清单，按顺序回退：
+  /// 1) raw.githubusercontent（更新最快，偶尔被污染）
+  /// 2) jsDelivr 镜像（稳定，按 @main 缓存，可能滞后半天）
+  /// 3) github.com 的 raw 跳转（前两个都失败时兜底）
+  static const List<String> updateManifestUrls = [
+    'https://raw.githubusercontent.com/kelstna/Kazumi-WebDAV/main/update.json',
+    'https://cdn.jsdelivr.net/gh/kelstna/Kazumi-WebDAV@main/update.json',
+    'https://github.com/kelstna/Kazumi-WebDAV/raw/main/update.json',
+  ];
 
   /// 规则API级别
   static const int apiLevel = 9;
