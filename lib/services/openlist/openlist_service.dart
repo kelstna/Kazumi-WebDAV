@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:kazumi/modules/roads/road_module.dart';
 import 'package:kazumi/modules/search/plugin_search_module.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/openlist/openlist_index_codec.dart';
 import 'package:kazumi/services/player/subtitle/subtitle_entry.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:path/path.dart' as p;
@@ -68,8 +69,21 @@ class OpenListService {
   static const Duration _timeout = Duration(seconds: 15);
   static const Duration _folderIndexTtl = Duration(minutes: 5);
 
+  /// 单目录 PROPFIND 的超时（比整表 `_timeout` 短，慢目录不该拖死整次扫描）。
+  static const Duration _dirTimeout = Duration(seconds: 8);
+
+  /// 目录扫描上限（与原实现一致），防止超大网盘扫到天荒地老。
+  static const int _maxFolders = 800;
+  static const int _maxDepth = 6;
+
+  /// 同时在飞的 PROPFIND 数量。串行扫 800 个目录要几十秒，并发 4 路快得多，
+  /// 又不至于把 NAS / 路由器打满。
+  static const int _scanConcurrency = 4;
+
   List<OpenListEntry>? _folderIndex;
   DateTime? _folderIndexAt;
+  bool _folderIndexRefreshing = false;
+  Future<List<OpenListEntry>>? _scanInFlight;
 
   static const Set<String> videoExtensions = {
     '.mkv',
@@ -134,7 +148,7 @@ class OpenListService {
       path.split('/').map(Uri.encodeComponent).join('/');
 
   /// 列目录（WebDAV PROPFIND depth=1）。
-  Future<List<OpenListEntry>> list(String path) async {
+  Future<List<OpenListEntry>> list(String path, {Duration? timeout}) async {
     if (!configured) {
       throw OpenListException('还没有配置 OpenList 地址');
     }
@@ -150,7 +164,8 @@ class OpenListService {
     request.headers.addAll(authHeaders);
     final client = http.Client();
     try {
-      final streamed = await client.send(request).timeout(_timeout);
+      final streamed =
+          await client.send(request).timeout(timeout ?? _timeout);
       final body = await streamed.stream.bytesToString();
       if (streamed.statusCode != 207 && streamed.statusCode != 200) {
         throw OpenListException(
@@ -227,6 +242,7 @@ class OpenListService {
   void invalidateFolderIndex() {
     _folderIndex = null;
     _folderIndexAt = null;
+    unawaited(OpenListIndexCache.instance.clear());
   }
 
   bool _isHiddenDir(String name) {
@@ -263,7 +279,16 @@ class OpenListService {
     return false;
   }
 
+  /// 目录索引的缓存 key（换地址/换根目录要各算各的）。
+  String get _cacheKey => base64Url
+      .encode(utf8.encode('$baseUrl|$rootPath'))
+      .replaceAll('=', '');
+
   /// 递归收集根目录下的所有文件夹，供搜索使用。
+  ///
+  /// 分两级缓存：进程内 [_folderIndex]（5 分钟）→ 磁盘快照
+  /// [OpenListIndexCache]。冷启动第一次搜索直接用上次的索引，
+  /// 后台再刷一遍，不必每次都把整棵目录树扫一遍。
   Future<List<OpenListEntry>> _collectFolders() async {
     final cached = _folderIndex;
     final cachedAt = _folderIndexAt;
@@ -272,39 +297,121 @@ class OpenListService {
         DateTime.now().difference(cachedAt) < _folderIndexTtl) {
       return cached;
     }
-    final root = rootPath;
+    final disk = await OpenListIndexCache.instance.read(_cacheKey);
+    if (disk != null) {
+      final folders = [
+        for (final folder in disk.folders)
+          OpenListEntry(
+            name: folder.name,
+            path: folder.path,
+            isDir: true,
+            modified: folder.modified,
+          ),
+      ];
+      _folderIndex = folders;
+      _folderIndexAt = disk.savedAt;
+      KazumiLogger().i(
+          'OpenListService: folder index from disk (${folders.length} dirs, '
+          'age ${DateTime.now().difference(disk.savedAt).inMinutes}min)');
+      unawaited(_refreshFolderIndexInBackground());
+      return folders;
+    }
+    final folders = await _scanFolders();
+    _folderIndex = folders;
+    _folderIndexAt = DateTime.now();
+    unawaited(OpenListIndexCache.instance.write(_cacheKey, folders));
+    return folders;
+  }
+
+  Future<void> _refreshFolderIndexInBackground() async {
+    if (_folderIndexRefreshing) {
+      return;
+    }
+    _folderIndexRefreshing = true;
+    try {
+      final folders = await _scanFolders();
+      _folderIndex = folders;
+      _folderIndexAt = DateTime.now();
+      await OpenListIndexCache.instance.write(_cacheKey, folders);
+    } catch (error) {
+      KazumiLogger()
+          .w('OpenListService: failed to refresh folder index', error: error);
+    } finally {
+      _folderIndexRefreshing = false;
+    }
+  }
+
+  /// 同一时刻只跑一次扫描：边输入边搜索时不要反复扫整棵目录树。
+  Future<List<OpenListEntry>> _scanFolders() {
+    final inFlight = _scanInFlight;
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final future = _scanFoldersInner();
+    _scanInFlight = future;
+    return future.whenComplete(() {
+      _scanInFlight = null;
+    });
+  }
+
+  /// 并发 BFS：最多 [_scanConcurrency] 个 PROPFIND 同时在飞。
+  Future<List<OpenListEntry>> _scanFoldersInner() async {
+    final stopwatch = Stopwatch()..start();
     final folders = <OpenListEntry>[];
-    final queue = <({String path, int depth})>[(path: root, depth: 0)];
     final scanned = <String>{};
-    while (queue.isNotEmpty && folders.length < 800) {
-      final current = queue.removeAt(0);
-      if (!scanned.add(current.path)) {
-        continue;
-      }
-      List<OpenListEntry> entries;
+    final queue = <({String path, int depth})>[(path: rootPath, depth: 0)];
+    final completer = Completer<void>();
+    var active = 0;
+
+    Future<void> scanOne(({String path, int depth}) current) async {
       try {
-        entries = await list(current.path);
+        final entries = await list(current.path, timeout: _dirTimeout);
+        for (final entry in entries) {
+          if (!entry.isDir) {
+            continue;
+          }
+          if (_isHiddenDir(entry.name) ||
+              _isIgnoredDir(entry.path, entry.name)) {
+            continue;
+          }
+          folders.add(entry);
+          if (current.depth < _maxDepth) {
+            queue.add((path: entry.path, depth: current.depth + 1));
+          }
+        }
       } catch (error) {
         KazumiLogger()
             .w('OpenListService: failed to list ${current.path}', error: error);
-        continue;
-      }
-      for (final entry in entries) {
-        if (!entry.isDir) {
-          continue;
-        }
-        if (_isHiddenDir(entry.name) ||
-            _isIgnoredDir(entry.path, entry.name)) {
-          continue;
-        }
-        folders.add(entry);
-        if (current.depth < 6) {
-          queue.add((path: entry.path, depth: current.depth + 1));
-        }
       }
     }
-    _folderIndex = folders;
-    _folderIndexAt = DateTime.now();
+
+    void pump() {
+      while (active < _scanConcurrency &&
+          queue.isNotEmpty &&
+          folders.length < _maxFolders) {
+        final current = queue.removeAt(0);
+        if (!scanned.add(current.path)) {
+          continue;
+        }
+        active++;
+        unawaited(scanOne(current).whenComplete(() {
+          active--;
+          pump();
+        }));
+      }
+      if (active == 0 &&
+          (queue.isEmpty || folders.length >= _maxFolders) &&
+          !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+
+    pump();
+    await completer.future;
+    stopwatch.stop();
+    KazumiLogger().i(
+        'OpenListService: folder scan finished in ${stopwatch.elapsedMilliseconds}ms '
+        '(${folders.length} dirs)');
     return folders;
   }
 
@@ -470,4 +577,76 @@ class OpenListService {
 
   String _safeName(String value) =>
       value.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+}
+
+/// WebDAV 目录索引的磁盘缓存：冷启动第一次搜索不用再全量扫目录。
+///
+/// 只存文件夹名字/路径/修改时间（约几十 KB），按 `baseUrl|rootPath` 分 key，
+/// 换地址或改根目录会自动失效。编码/解析在 `openlist_index_codec.dart`。
+class OpenListIndexCache {
+  OpenListIndexCache._();
+
+  static final OpenListIndexCache instance = OpenListIndexCache._();
+
+  static const String _fileName = 'openlist_folder_index.json';
+
+  File? _file;
+
+  Future<File> _resolveFile() async {
+    final cached = _file;
+    if (cached != null) {
+      return cached;
+    }
+    final dir = await getApplicationSupportDirectory();
+    return _file = File(p.join(dir.path, _fileName));
+  }
+
+  Future<DecodedOpenListIndex?> read(String key) async {
+    try {
+      final file = await _resolveFile();
+      if (!await file.exists()) {
+        return null;
+      }
+      return decodeOpenListIndex(await file.readAsString(), key: key);
+    } catch (error) {
+      KazumiLogger()
+          .w('OpenListService: failed to read folder index cache', error: error);
+      return null;
+    }
+  }
+
+  Future<void> write(String key, List<OpenListEntry> folders) async {
+    try {
+      final file = await _resolveFile();
+      final payload = encodeOpenListIndex(
+        key: key,
+        savedAt: DateTime.now(),
+        folders: [
+          for (final entry in folders)
+            OpenListIndexFolder(
+              name: entry.name,
+              path: entry.path,
+              modified: entry.modified,
+            ),
+        ],
+      );
+      await file.parent.create(recursive: true);
+      await file.writeAsString(payload, flush: true);
+    } catch (error) {
+      KazumiLogger().w('OpenListService: failed to write folder index cache',
+          error: error);
+    }
+  }
+
+  Future<void> clear() async {
+    try {
+      final file = await _resolveFile();
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (error) {
+      KazumiLogger().w('OpenListService: failed to clear folder index cache',
+          error: error);
+    }
+  }
 }

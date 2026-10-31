@@ -1,25 +1,25 @@
 {
     "schema":  1,
     "version":  "2.3.9",
-    "build":  20316,
-    "tag":  "v2.3.9.20316",
-    "publishedAt":  "2026-10-31T11:08:22Z",
-    "notes":  "# Kazumi 修改版 2.3.9 (20316)\n\n## 本次更新\n\n- **状态栏收回时机对齐 VLC**：点屏幕收起控制层时，状态栏**当场就收**；上一版是等控制层淡出 300ms 之后才收，所以看起来比 VLC 慢了两三倍。\n- **顶部让位量固定为 24dp**（无边框播放页里），不再跟着系统 inset 变化。这是之前必须延迟收状态栏的原因——现在不会跳到，状态栏什么时候收都不影响顶部控制栏的位置。\n- **淡入淡出保持不变**：控制层（顶栏 / 底栏 / 遮罩）仍是原地淡入淡出。\n- **不受影响**：字幕 / 音轨 / 弹幕 / 更新等功能，竖屏小窗、画中画、桌面端。\n\n…（完整说明见 Release 页面）",
-    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20316",
+    "build":  20317,
+    "tag":  "v2.3.9.20317",
+    "publishedAt":  "2026-10-31T11:32:52Z",
+    "notes":  "# Kazumi 修改版 2.3.9 (20317)\n\n## 本次更新\n\n- **修「只有声音、画面一直停在『视频资源解析成功, 播放器加载中』」**：播放器的加载遮罩以前只有一条出口——`init()` 跑到最末尾才收起。打开流程里任何一步卡住（WebDAV 上很常见）、或者被下一次切集顶掉，遮罩就永远盖在画面上，而音频早就开始响了。现在：\n  - `open()` 成功就收起遮罩，字幕发现 / 音轨选择 / 音量同步都算后台收尾，不再挡画面；\n  - 首帧、`playing`、播放进度前进，任一信号到达也立刻收起；\n  - 8 秒绝对兜底：到点还没有任何信号，照样收起遮罩，让人看见真实状态，而不是无限转圈；\n  - 所有「没拿到播放器」的分支都补了收尾，不再静默死等。\n- **识别「有声音没画面」并自动降级一次**：起播 8 秒仍拿不到首帧、而文件确实有视频轨时，提示一次并**关掉硬件解码重开同一集**（同一集只试一次），再不行给出可操作提示（关闭硬件解码 / 换来源）。\n- **WebDAV 冷启动搜索变快**：\n  - 目录索引**落盘缓存**，下次开机第一次搜索直接用上次的索引，后台再刷一遍，不必每次重扫整棵目录树；\n  - 目录扫描改成**并发 4 路** PROPFIND，单目录超时 8 秒，慢目录不再拖死整次扫描；\n  - 同一时刻只跑一次扫描（边输入边搜不会反复扫）；改 WebDAV 地址/根目录自动失效。\n- **直链播放失败不再只剩黑屏**：WebDAV 集数打不开时给出「播放器初始化失败，请重试或换一个视频来源」。\n\n## 下载哪个包\n\n| 文件 | 包名 | 怎么用 |\n| --- | --- | --- |\n| `Kazumi-2.3.9-20317-android-arm64.apk` | `com.predidit.kazumi` | 替换版：手机上已有官方 Kazumi 要先卸载（签名不同装不上） |\n| `Kazumi-2.3.9-20317-android-arm64-coexist.apk` | `com.predidit.kazumi.mod` | 共存版：和官方版同时装，桌面上多一个「Kazumi 字幕版」 |\n\n## 升级说明\n\n- 同包型直接覆盖安装，不需要卸载（签名一致）。\n- 替换版 ↔ 共存版互不覆盖。\n\n## 手动验证\n\n1. 用 WebDAV 来源打开之前卡住的那几集 → 画面最迟 8 秒内出现（或给出明确提示），不会一直停在「播放器加载中」；\n2. 若确实没有画面：先弹「画面未就绪，已切换软解重试」，重开一次；仍不行时提示「画面没有出来，可尝试关闭硬件解码或换一个视频来源」；\n3. 正常能播的番（例如之前没出问题的那部）→ 起播更快，不重开、不闪、不误报；\n4. 杀掉进程后第一次搜 WebDAV → 明显更快（日志里能看到 `folder index from disk`），搜出来的番剧列表与之前一致；\n5. 在线源（非 WebDAV）播放、字幕/音轨自动选择、弹幕、控制层/状态栏行为都不变。\n\n## 回滚\n\n- 回滚点：`git tag rollback-2.3.9-20314`（提交 `b7977c29`）；20315 = `4d1aa0d0`，20316 = `90811198`。\n- 直接装回旧包属于降级，普通安装器会拒绝；要回滚出包时把版本号 +1 重编。\n- 本版改动集中在 `player_playback_controller.dart`（起播兜底/无画面探测）、`player_controller.dart`（收遮罩时机）、`video_controller.dart`（直链失败提示）、`openlist_service.dart` + 新增 `openlist_index_codec.dart`（目录索引缓存）。\n\n## SHA256\n\n| 文件 | SHA256 |\n| --- | --- |\n| `Kazumi-2.3.9-20317-android-arm64.apk` | `bd45b80360a36ed511341d904a2441cb3c7c0a9a3ce8de638711c3388d1acb4e` |\n| `Kazumi-2.3.9-20317-android-arm64-coexist.apk` | `bf680951dd13c2fad619249c16f15be126d417a39dcf7f630b9d90fd1e952063` |\n\n## 已知限制\n\n- 起播兜底是「先让人看见画面/错误」，不是修复底层解码：如果某个文件在软解下依然没有画面，只能换来源或用外部播放器。\n- 无画面判定依赖 mpv 报告的视频轨；纯音频文件不会被误判，也不会触发重开。\n- 目录索引缓存按 `地址 + 根目录` 分 key，换地址自动失效；目录结构大改后可点设置里的「刷新」或等后台刷新。\n- 本机 `flutter test` 跑不了，验证方式为 `flutter analyze` 0 error + 纯函数 dart 脚本 + 真机验收。\n- 更新包用本机 debug keystore 签名。\n- 本次未发布 Release；`update.json` 已按 20317 生成，推送前先发 Release。",
+    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20317",
     "assets":  [
                    {
                        "variant":  "replace",
-                       "file":  "Kazumi-2.3.9-20316-android-arm64.apk",
-                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20316/Kazumi-2.3.9-20316-android-arm64.apk",
-                       "sha256":  "716bb4a1b949c9549b926a9f251da5f055541e1ee5622b1ee6825abe0aeffb04",
-                       "size":  33612629
+                       "file":  "Kazumi-2.3.9-20317-android-arm64.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20317/Kazumi-2.3.9-20317-android-arm64.apk",
+                       "sha256":  "bd45b80360a36ed511341d904a2441cb3c7c0a9a3ce8de638711c3388d1acb4e",
+                       "size":  33614637
                    },
                    {
                        "variant":  "coexist",
-                       "file":  "Kazumi-2.3.9-20316-android-arm64-coexist.apk",
-                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20316/Kazumi-2.3.9-20316-android-arm64-coexist.apk",
-                       "sha256":  "6445ae4b462244703e5608d866819c7a219f078932a62c8dbb87a5f22de5df30",
-                       "size":  33612741
+                       "file":  "Kazumi-2.3.9-20317-android-arm64-coexist.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20317/Kazumi-2.3.9-20317-android-arm64-coexist.apk",
+                       "sha256":  "bf680951dd13c2fad619249c16f15be126d417a39dcf7f630b9d90fd1e952063",
+                       "size":  33614861
                    }
                ]
 }
