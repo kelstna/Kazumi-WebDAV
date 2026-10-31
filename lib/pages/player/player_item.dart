@@ -156,6 +156,9 @@ class _PlayerItemState extends State<PlayerItem>
   // Keeps the system status bar in step with the player control layer.
   late mobx.ReactionDisposer _controlsVisibilityListener;
 
+  // Locking must drop the status bar immediately, and unlocking brings it back.
+  late mobx.ReactionDisposer _lockPanelListener;
+
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
@@ -975,10 +978,12 @@ class _PlayerItemState extends State<PlayerItem>
 
   /// The status bar leaves the moment the controls start to hide, like VLC.
   /// The top row keeps a fixed inset, so nothing shifts when the bar goes.
+  /// A locked panel keeps it off entirely: locking hides the whole chrome.
   void _syncStatusBarOverlay() {
     unawaited(DisplayModeService.setStatusBarOverlay(
       owner: this,
-      visible: playerController.panel.showVideoController,
+      visible: playerController.panel.showVideoController &&
+          !playerController.panel.lockPanel,
     ));
   }
 
@@ -1345,6 +1350,10 @@ class _PlayerItemState extends State<PlayerItem>
       (_) => playerController.panel.showVideoController,
       (_) => _syncStatusBarOverlay(),
     );
+    _lockPanelListener = mobx.reaction<bool>(
+      (_) => playerController.panel.lockPanel,
+      (_) => _syncStatusBarOverlay(),
+    );
     _screenshotFeedbackController = AnimationController(
       duration: const Duration(milliseconds: 420),
       vsync: this,
@@ -1396,6 +1405,7 @@ class _PlayerItemState extends State<PlayerItem>
     _fullscreenListener();
     _playerSizeListener();
     _controlsVisibilityListener();
+    _lockPanelListener();
     WidgetsBinding.instance.removeObserver(this);
     windowManager.removeListener(this);
     playerController.seeking.invalidateInteractiveSeek();

@@ -227,6 +227,9 @@ class MainActivity: AudioServiceActivity() {
             // the navigation bar stays hidden.
             controller.hide(WindowInsetsCompat.Type.navigationBars())
             controller.show(WindowInsetsCompat.Type.statusBars())
+            // Some ROMs pick the icon colour from the content behind the bar.
+            // The player paints a dark scrim there, so ask for light icons too.
+            controller.isAppearanceLightStatusBars = false
         } else {
             controller.hide(WindowInsetsCompat.Type.systemBars())
         }

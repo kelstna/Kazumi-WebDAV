@@ -103,6 +103,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   /// The whole control layer fades instead of sliding, so it comes and goes
   /// with the system status bar as one surface (VLC behaviour).
   late final Animation<double> _panelOpacity;
+
+  /// Scrims darken ahead of the controls, so the status bar never samples a
+  /// bright backdrop while it slides in.
+  late final Animation<double> _scrimOpacity;
   late final VideoPageController videoPageController =
       widget.videoPageController;
   late final PlayerController playerController;
@@ -129,6 +133,12 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   /// 43dp inset over a 34dp icon band), so the top bar never moves down further
   /// than a standard status bar.
   static const double _maxTopControlsInset = 24.0;
+
+  /// One shade shared by both scrims, so the top and bottom edges read as the
+  /// same surface. Never fully opaque: a soft gradient, not a black bar.
+  /// Darker than the old black45 because some ROMs pick the status bar icon
+  /// colour from the brightness behind it; white icons need a dark backdrop.
+  static const Color _scrimShade = Color(0xBF000000);
 
   @override
   void dispose() {
@@ -351,6 +361,11 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     textFieldFocus.addListener(_onDanmakuEditFocusChanged);
     _panelOpacity = widget.panelVisibilityController
         .drive(CurveTween(curve: Curves.easeInOut));
+    _scrimOpacity = widget.panelVisibilityController.drive(
+      CurveTween(
+        curve: const Interval(0.0, 0.45, curve: Curves.easeOut),
+      ),
+    );
     _cachedDanmakuOffIcon = RepaintBoundary(
       child: SvgPicture.asset(
         'assets/images/danmaku_off.svg',
@@ -441,6 +456,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     final double topInset = !isDesktop() && widget.fillsWindow
         ? _maxTopControlsInset
         : math.min(MediaQuery.paddingOf(context).top, _maxTopControlsInset);
+    final double sideInset = _sideInsetOf(context);
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -449,9 +465,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           left: 0,
           right: 0,
           child: _buildScrim(
-            height: 50 + topInset,
-            colors: const [Colors.black45, Colors.transparent],
-            opacity: _panelOpacity,
+            height: 96,
+            colors: const [_scrimShade, Colors.transparent],
+            opacity: _scrimOpacity,
           ),
         ),
         Positioned(
@@ -460,8 +476,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           right: 0,
           child: _buildScrim(
             height: 100,
-            colors: const [Colors.transparent, Colors.black45],
-            opacity: _panelOpacity,
+            colors: const [Colors.transparent, _scrimShade],
+            opacity: _scrimOpacity,
           ),
         ),
         Positioned(
@@ -527,8 +543,30 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     ? playerController.panel.showVideoController
                     : true,
                 child: widget.disableAnimations
-                    ? _rightControls
-                    : _fadeWhenHidden(_rightControls),
+                    ? _buildRightControls(sideInset)
+                    : _fadeWhenHidden(_buildRightControls(sideInset)),
+              );
+            }),
+          ),
+        // Locked: the same unlock button on the left, so either hand can reach
+        // one. It mirrors the right column and the right column keeps the same
+        // distance from its edge.
+        if (!isDesktop())
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: Observer(builder: (context) {
+              if (!playerController.panel.lockPanel) {
+                return const SizedBox.shrink();
+              }
+              return Visibility(
+                visible: widget.disableAnimations
+                    ? playerController.panel.showVideoController
+                    : true,
+                child: widget.disableAnimations
+                    ? _buildLeftControls(sideInset)
+                    : _fadeWhenHidden(_buildLeftControls(sideInset)),
               );
             }),
           ),
@@ -1019,12 +1057,25 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     );
   }
 
-  Widget get _rightControls {
-    return SafeArea(
-      top: false,
-      bottom: false,
-      left: widget.fillsWindow,
-      right: widget.fillsWindow,
+  /// Mirrors whichever side the front camera is on, and is the same for both
+  /// edges so the two button columns stay symmetric. No setting: it follows the
+  /// display cutout, which viewPadding keeps even while the bars are hidden.
+  double _sideInsetOf(BuildContext context) {
+    final EdgeInsets bars = MediaQuery.paddingOf(context);
+    final EdgeInsets cutout = MediaQuery.viewPaddingOf(context);
+    return math.max(
+      math.max(bars.left, bars.right),
+      math.max(cutout.left, cutout.right),
+    );
+  }
+
+  void _togglePanelLock() {
+    playerController.panel.lockPanel = !playerController.panel.lockPanel;
+  }
+
+  Widget _buildRightControls(double sideInset) {
+    return Padding(
+      padding: EdgeInsets.only(right: sideInset),
       child: PlayerPanelHoldMouseRegion(
         acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
         cursor: SystemMouseCursors.basic,
@@ -1048,10 +1099,29 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 color: Colors.white,
               ),
               tooltip: playerController.panel.lockPanel ? '解锁面板' : '锁定面板',
-              onPressed: () {
-                playerController.panel.lockPanel =
-                    !playerController.panel.lockPanel;
-              },
+              onPressed: _togglePanelLock,
+            ),
+            const Spacer(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Locked state only: the same unlock button as the right column, mirrored.
+  Widget _buildLeftControls(double sideInset) {
+    return Padding(
+      padding: EdgeInsets.only(left: sideInset),
+      child: PlayerPanelHoldMouseRegion(
+        acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
+        cursor: SystemMouseCursors.basic,
+        child: Column(
+          children: [
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.lock_outline, color: Colors.white),
+              tooltip: '解锁面板',
+              onPressed: _togglePanelLock,
             ),
             const Spacer(),
           ],
