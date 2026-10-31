@@ -49,6 +49,7 @@ class MainActivity: AudioServiceActivity() {
     private var pipSourceRect: Rect? = null
     private var inPipMode = false
     private var systemBarsHidden = false
+    private var statusBarOverlayVisible = false
     private var originalWindowBackground: Drawable? = null
     private var windowBackgroundOverridden = false
 
@@ -126,8 +127,10 @@ class MainActivity: AudioServiceActivity() {
             } else if (call.method == "getAndroidSdkVersion") {
                 val sdkVersion = getAndroidSdkVersion()
                 result.success(sdkVersion)
-            } else if (call.method == "setSystemBarsHidden") {
-                systemBarsHidden = call.arguments as? Boolean ?: false
+            } else if (call.method == "setSystemBarsState") {
+                val state = call.arguments as? Map<*, *>
+                systemBarsHidden = state?.get("hidden") as? Boolean ?: false
+                statusBarOverlayVisible = state?.get("statusBarOverlay") as? Boolean ?: false
                 applySystemBarsState()
                 result.success(null)
             } else {
@@ -213,12 +216,19 @@ class MainActivity: AudioServiceActivity() {
         }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowCompat.getInsetsController(window, window.decorView)
-        if (systemBarsHidden) {
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-        } else {
+        if (!systemBarsHidden) {
             controller.show(WindowInsetsCompat.Type.systemBars())
+            return
+        }
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (statusBarOverlayVisible) {
+            // Controls are on screen: reveal only the status bar (VLC style),
+            // the navigation bar stays hidden.
+            controller.hide(WindowInsetsCompat.Type.navigationBars())
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
         }
     }
 

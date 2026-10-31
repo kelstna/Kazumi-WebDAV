@@ -440,6 +440,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       );
 
   Widget _buildPanel(bool compact) {
+    // Zero while immersive; the status bar height once the controls reveal it,
+    // so the top row moves down just enough to clear it.
+    final double topInset = MediaQuery.paddingOf(context).top;
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -448,7 +451,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           left: 0,
           right: 0,
           child: _buildScrim(
-            height: 50,
+            height: 50 + topInset,
             colors: const [Colors.black45, Colors.transparent],
             offset: _topOffsetAnimation,
           ),
@@ -827,7 +830,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     return EmbeddedNativeControlArea(
       requireOffset: compact || !videoPageController.isFullscreen,
       child: SafeArea(
-        top: false,
+        top: true,
         bottom: false,
         left: !compact && widget.fillsWindow,
         right: !compact && widget.fillsWindow,

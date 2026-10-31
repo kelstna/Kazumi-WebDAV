@@ -11,8 +11,18 @@ class DisplayModeService {
   static const _intentChannel = MethodChannel('com.predidit.kazumi/intent');
   static Future<void> _pendingFullscreen = Future.value();
   static Future<void>? _pendingSystemBars;
+
+  /// Page level intent: the route wants an immersive window.
   static Object? _systemBarsOwner;
   static bool _systemBarsHidden = false;
+
+  /// Player control layer: show the status bar without leaving immersion.
+  static Object? _statusBarOverlayOwner;
+  static bool _statusBarOverlay = false;
+
+  /// Last state handed to the platform, used to skip redundant channel calls.
+  static bool _appliedHidden = false;
+  static bool _appliedStatusBarOverlay = false;
 
   static Future<void> applyVideoFullscreen(bool fullscreen) {
     return _pendingFullscreen = _pendingFullscreen.then((_) async {
@@ -39,7 +49,8 @@ class DisplayModeService {
     required bool hidden,
   }) {
     _systemBarsOwner = owner;
-    return _setSystemBarsHidden(hidden);
+    _systemBarsHidden = hidden;
+    return _applySystemBars();
   }
 
   static Future<void> releaseSystemBars(Object owner) {
@@ -47,21 +58,46 @@ class DisplayModeService {
       return _pendingSystemBars ?? Future.value();
     }
     _systemBarsOwner = null;
-    return _setSystemBarsHidden(false);
+    _systemBarsHidden = false;
+    return _applySystemBars();
   }
 
-  static Future<void> _setSystemBarsHidden(bool hidden) {
-    if (_systemBarsHidden == hidden) {
+  /// The player control layer is on screen, so the status bar comes back while
+  /// the page itself stays immersive - the VLC behaviour. Only Android exposes
+  /// the status bar alone; the layout reads the resulting inset back from
+  /// MediaQuery, so no fixed height is hard coded here.
+  static Future<void> setStatusBarOverlay({
+    required Object owner,
+    required bool visible,
+  }) {
+    if (!visible && !identical(_statusBarOverlayOwner, owner)) {
       return _pendingSystemBars ?? Future.value();
     }
-    _systemBarsHidden = hidden;
+    _statusBarOverlayOwner = visible ? owner : null;
+    if (_statusBarOverlay == visible) {
+      return _pendingSystemBars ?? Future.value();
+    }
+    _statusBarOverlay = visible;
+    return _applySystemBars();
+  }
+
+  static Future<void> _applySystemBars() {
+    final bool hidden = _systemBarsHidden;
+    final bool overlay = hidden && _statusBarOverlay && Platform.isAndroid;
+    if (hidden == _appliedHidden && overlay == _appliedStatusBarOverlay) {
+      return _pendingSystemBars ?? Future.value();
+    }
+    _appliedHidden = hidden;
+    _appliedStatusBarOverlay = overlay;
     // Rotation acknowledgements must not delay immersion or route cleanup.
     late final Future<void> request;
     request = (_pendingSystemBars ?? Future<void>.value())
         .then((_) => _attempt(() async {
               if (Platform.isAndroid) {
-                await _intentChannel.invokeMethod(
-                    'setSystemBarsHidden', hidden);
+                await _intentChannel.invokeMethod('setSystemBarsState', {
+                  'hidden': hidden,
+                  'statusBarOverlay': overlay,
+                });
               } else if (Platform.isIOS) {
                 await SystemChrome.setEnabledSystemUIMode(
                   hidden

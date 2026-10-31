@@ -43,6 +43,7 @@ import 'package:kazumi/services/player/audio_controller.dart';
 import 'package:kazumi/services/player/timed_shutdown_service.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/services/platform/player_menu_service.dart';
+import 'package:kazumi/services/platform/display_mode_service.dart';
 
 class PlayerItem extends StatefulWidget {
   const PlayerItem({
@@ -151,6 +152,9 @@ class _PlayerItemState extends State<PlayerItem>
   late mobx.ReactionDisposer _playerSizeListener;
 
   late mobx.ReactionDisposer _fullscreenListener;
+
+  // Keeps the system status bar in step with the player control layer.
+  late mobx.ReactionDisposer _controlsVisibilityListener;
 
   @override
   void didChangeMetrics() {
@@ -969,12 +973,32 @@ class _PlayerItemState extends State<PlayerItem>
   bool get _canHidePlayerPanel =>
       playerController.panel.canHidePlayerPanel && _playerPanelHolds.isEmpty;
 
+  /// The controls count as on screen while they slide out, so the status bar
+  /// leaves together with them instead of shifting the row mid animation.
+  bool get _playerControlsOnScreen =>
+      playerController.panel.showVideoController ||
+      _panelVisibilityController.value > 0;
+
+  void _syncStatusBarOverlay() {
+    unawaited(DisplayModeService.setStatusBarOverlay(
+      owner: this,
+      visible: _playerControlsOnScreen,
+    ));
+  }
+
+  void _handlePanelVisibilityStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) {
+      _syncStatusBarOverlay();
+    }
+  }
+
   void showVideoController({bool restartHideTimer = true}) {
     // Re-forwarding restarts the ticker and stalls a frame, so hover must not.
     if (!_panelVisibilityController.isForwardOrCompleted) {
       _panelVisibilityController.forward();
     }
     playerController.panel.showVideoController = true;
+    _syncStatusBarOverlay();
     if (restartHideTimer && _canHidePlayerPanel) {
       _startHideTimer();
     }
@@ -987,6 +1011,7 @@ class _PlayerItemState extends State<PlayerItem>
     _panelVisibilityController.reverse();
     _cancelHideTimer();
     playerController.panel.showVideoController = false;
+    _syncStatusBarOverlay();
   }
 
   PlayerPanelHold acquirePlayerPanelHold() {
@@ -1326,6 +1351,11 @@ class _PlayerItemState extends State<PlayerItem>
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
+    _panelVisibilityController.addStatusListener(_handlePanelVisibilityStatus);
+    _controlsVisibilityListener = mobx.reaction<bool>(
+      (_) => playerController.panel.showVideoController,
+      (_) => _syncStatusBarOverlay(),
+    );
     _screenshotFeedbackController = AnimationController(
       duration: const Duration(milliseconds: 420),
       vsync: this,
@@ -1376,6 +1406,7 @@ class _PlayerItemState extends State<PlayerItem>
     // The route-scoped PlayerController owns playback disposal.
     _fullscreenListener();
     _playerSizeListener();
+    _controlsVisibilityListener();
     WidgetsBinding.instance.removeObserver(this);
     windowManager.removeListener(this);
     playerController.seeking.invalidateInteractiveSeek();
@@ -1383,9 +1414,14 @@ class _PlayerItemState extends State<PlayerItem>
     hideTimer?.cancel();
     mouseScrollerTimer?.cancel();
     _adjustmentHudHideTimer?.cancel();
+    _panelVisibilityController.removeStatusListener(_handlePanelVisibilityStatus);
     _panelVisibilityController.dispose();
     _screenshotFeedbackController.dispose();
     _disposePlayerMenu();
+    unawaited(DisplayModeService.setStatusBarOverlay(
+      owner: this,
+      visible: false,
+    ));
     if (Platform.isAndroid) {
       unawaited(_syncAndroidPIPPlayerPageState(false));
       PipUtils.disposePipHandler();
