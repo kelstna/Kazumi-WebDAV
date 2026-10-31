@@ -3,6 +3,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
@@ -99,9 +100,9 @@ class PlayerItemPanel extends StatefulWidget {
 }
 
 class _PlayerItemPanelState extends State<PlayerItemPanel> {
-  late final Animation<Offset> _topOffsetAnimation;
-  late final Animation<Offset> _bottomOffsetAnimation;
-  late final Animation<Offset> _rightOffsetAnimation;
+  /// The whole control layer fades instead of sliding, so it comes and goes
+  /// with the system status bar as one surface (VLC behaviour).
+  late final Animation<double> _panelOpacity;
   late final VideoPageController videoPageController =
       widget.videoPageController;
   late final PlayerController playerController;
@@ -123,6 +124,11 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
   static const double _danmakuIconSize = 24.0;
   static const double _loadingIndicatorStrokeWidth = 2.0;
+
+  /// Some ROMs report more status bar inset than they actually paint (here a
+  /// 43dp inset over a 34dp icon band), so the top bar never moves down further
+  /// than a standard status bar.
+  static const double _maxTopControlsInset = 24.0;
 
   @override
   void dispose() {
@@ -343,20 +349,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     super.initState();
     playerController = widget.playerController;
     textFieldFocus.addListener(_onDanmakuEditFocusChanged);
-    final visibility = widget.panelVisibilityController
+    _panelOpacity = widget.panelVisibilityController
         .drive(CurveTween(curve: Curves.easeInOut));
-    _topOffsetAnimation = visibility.drive(Tween<Offset>(
-      begin: const Offset(0, -1),
-      end: Offset.zero,
-    ));
-    _bottomOffsetAnimation = visibility.drive(Tween<Offset>(
-      begin: const Offset(0, 1),
-      end: Offset.zero,
-    ));
-    _rightOffsetAnimation = visibility.drive(Tween<Offset>(
-      begin: const Offset(1, 0),
-      end: Offset.zero,
-    ));
     _cachedDanmakuOffIcon = RepaintBoundary(
       child: SvgPicture.asset(
         'assets/images/danmaku_off.svg',
@@ -440,9 +434,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       );
 
   Widget _buildPanel(bool compact) {
-    // Zero while immersive; the status bar height once the controls reveal it,
-    // so the top row moves down just enough to clear it.
-    final double topInset = MediaQuery.paddingOf(context).top;
+    // Zero while immersive; the status bar height once the controls reveal it.
+    // Capped: see [_maxTopControlsInset].
+    final double topInset =
+        math.min(MediaQuery.paddingOf(context).top, _maxTopControlsInset);
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -453,7 +448,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           child: _buildScrim(
             height: 50 + topInset,
             colors: const [Colors.black45, Colors.transparent],
-            offset: _topOffsetAnimation,
+            opacity: _panelOpacity,
           ),
         ),
         Positioned(
@@ -463,7 +458,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           child: _buildScrim(
             height: 100,
             colors: const [Colors.transparent, Colors.black45],
-            offset: _bottomOffsetAnimation,
+            opacity: _panelOpacity,
           ),
         ),
         Positioned(
@@ -530,9 +525,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     : true,
                 child: widget.disableAnimations
                     ? _rightControls
-                    : SlideTransition(
-                        position: _rightOffsetAnimation,
-                        child: _rightControls),
+                    : _fadeWhenHidden(_rightControls),
               );
             }),
           ),
@@ -547,10 +540,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       ? playerController.panel.showVideoController
                       : true),
               child: widget.disableAnimations
-                  ? _buildTopControls(compact)
-                  : SlideTransition(
-                      position: _topOffsetAnimation,
-                      child: _buildTopControls(compact)),
+                  ? _buildTopControls(compact, topInset)
+                  : _fadeWhenHidden(_buildTopControls(compact, topInset)),
             );
           }),
         ),
@@ -566,9 +557,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       : true),
               child: widget.disableAnimations
                   ? _buildBottomControls(compact)
-                  : SlideTransition(
-                      position: _bottomOffsetAnimation,
-                      child: _buildBottomControls(compact)),
+                  : _fadeWhenHidden(_buildBottomControls(compact)),
             );
           }),
         ),
@@ -576,10 +565,16 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     );
   }
 
+  /// Faded layers stay on screen, so hidden controls must stop taking taps.
+  Widget _fadeWhenHidden(Widget child) => IgnorePointer(
+        ignoring: !playerController.panel.showVideoController,
+        child: FadeTransition(opacity: _panelOpacity, child: child),
+      );
+
   Widget _buildScrim({
     required double height,
     required List<Color> colors,
-    required Animation<Offset> offset,
+    required Animation<double> opacity,
   }) =>
       Observer(builder: (context) {
         final scrim = Container(
@@ -598,7 +593,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                   playerController.panel.showVideoController),
           child: widget.disableAnimations
               ? scrim
-              : SlideTransition(position: offset, child: scrim),
+              : FadeTransition(opacity: opacity, child: scrim),
         );
       });
 
@@ -826,14 +821,16 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     );
   }
 
-  Widget _buildTopControls(bool compact) {
+  Widget _buildTopControls(bool compact, double topInset) {
+    final EdgeInsets safePadding = MediaQuery.paddingOf(context);
     return EmbeddedNativeControlArea(
       requireOffset: compact || !videoPageController.isFullscreen,
-      child: SafeArea(
-        top: true,
-        bottom: false,
-        left: !compact && widget.fillsWindow,
-        right: !compact && widget.fillsWindow,
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: topInset,
+          left: !compact && widget.fillsWindow ? safePadding.left : 0,
+          right: !compact && widget.fillsWindow ? safePadding.right : 0,
+        ),
         child: PlayerPanelHoldMouseRegion(
           acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
           cursor: (videoPageController.isFullscreen &&
