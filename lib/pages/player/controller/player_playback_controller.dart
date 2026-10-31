@@ -3,6 +3,7 @@
 
 // ignore_for_file: library_private_types_in_public_api
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -82,6 +83,34 @@ abstract class _PlayerPlaybackController with Store {
   final AsyncSerialQueue _prefetchWrites = AsyncSerialQueue();
   bool _prefetchSuspendWanted = false;
 
+  // ---- 起播兜底 / 「有声音没画面」探测 --------------------------------
+  //
+  // `loading` 原本只在 init() 末尾降为 false：只要打开流程里任何一个 await
+  // 卡住、或被下一次切集顶掉，遮罩就永远盖在画面上（音频还在响，因为
+  // player.open() 早已带 play 打开）。这里补三件事：
+  //   1. 起播信号（首帧 / playing / position 前进）任一到达即收起遮罩；
+  //   2. 绝对上限：到点仍无信号也收起遮罩，让用户看到真实状态；
+  //   3. 有音无画：起播后仍拿不到首帧，且文件确实有视频轨，就提示一次
+  //      并关掉硬件解码重开一次。
+  static const Duration _startupDeadline = Duration(seconds: 8);
+  static const Duration _videoFrameDeadline = Duration(seconds: 8);
+
+  /// 首帧是否已到达（纯音频文件恒为 false）。
+  bool videoReady = false;
+
+  /// 起播阶段是否已超时收起遮罩（UI 不再停在「播放器加载中」）。
+  bool startupStalled = false;
+
+  bool _softDecodeRetryTried = false;
+  bool _hasVideoTrack = false;
+  Media? _currentMedia;
+  Timer? _startupWatchdog;
+  Timer? _videoWatchdog;
+  StreamSubscription<VideoParams>? _videoParamsSubscription;
+  StreamSubscription<Tracks>? _tracksSubscription;
+  StreamSubscription<bool>? _playingSubscription;
+  StreamSubscription<Duration>? _positionSubscription;
+
   bool hAenable = true;
   late String hardwareDecoder;
   bool androidEnableOpenSLES = true;
@@ -138,8 +167,211 @@ abstract class _PlayerPlaybackController with Store {
     } catch (_) {}
   }
 
+  /// 起播探针：首帧、轨道列表、起播信号，外加一个绝对上限的兜底计时器。
+  /// 每次新建播放器时挂一次，[stop] / [resetForInit] 时拆掉。
+  void _armStartupProbes(Player player) {
+    _teardownStartupProbes();
+    videoReady = false;
+    startupStalled = false;
+    _hasVideoTrack = false;
+    _softDecodeRetryTried = false;
+
+    _videoParamsSubscription = player.stream.videoParams.listen((params) {
+      final int width = params.w ?? 0;
+      final int height = params.h ?? 0;
+      // 换文件/停止时 mpv 会广播一个空 VideoParams，别把它当首帧。
+      if (width <= 0 || height <= 0 || videoReady) {
+        return;
+      }
+      videoReady = true;
+      KazumiLogger().i(
+          'PlayerController: first video frame ${width}x$height, releasing loading');
+      _finishStartup(reason: 'first-frame');
+    });
+
+    _tracksSubscription = player.stream.tracks.listen((tracks) {
+      _hasVideoTrack = _hasUsableVideoTrack(tracks);
+    });
+
+    _playingSubscription = player.stream.playing.listen((playing) {
+      if (!playing) {
+        return;
+      }
+      _finishStartup(reason: 'playing');
+      _armVideoWatchdog();
+    });
+
+    _positionSubscription = player.stream.position.listen((position) {
+      if (position <= Duration.zero) {
+        return;
+      }
+      _finishStartup(reason: 'position');
+      _armVideoWatchdog();
+    });
+
+    _startupWatchdog?.cancel();
+    _startupWatchdog = Timer(_startupDeadline, () {
+      _startupWatchdog = null;
+      if (!loading) {
+        return;
+      }
+      startupStalled = true;
+      KazumiLogger().w(
+          'PlayerController: startup stalled ${_startupDeadline.inSeconds}s, '
+          'releasing loading overlay');
+      _setLoading(false);
+    });
+  }
+
+  void _teardownStartupProbes() {
+    _startupWatchdog?.cancel();
+    _startupWatchdog = null;
+    _videoWatchdog?.cancel();
+    _videoWatchdog = null;
+    unawaited(_videoParamsSubscription?.cancel());
+    _videoParamsSubscription = null;
+    unawaited(_tracksSubscription?.cancel());
+    _tracksSubscription = null;
+    unawaited(_playingSubscription?.cancel());
+    _playingSubscription = null;
+    unawaited(_positionSubscription?.cancel());
+    _positionSubscription = null;
+  }
+
+  static bool _hasUsableVideoTrack(Tracks tracks) => tracks.video
+      .any((track) => track.id != 'auto' && track.id != 'no');
+
+  /// 起播信号到达：收起加载遮罩。
+  void _finishStartup({required String reason}) {
+    _startupWatchdog?.cancel();
+    _startupWatchdog = null;
+    // position 事件每秒来很多次，起播信号拿到后就退订，播放期间不空转。
+    unawaited(_positionSubscription?.cancel());
+    _positionSubscription = null;
+    if (!loading) {
+      return;
+    }
+    KazumiLogger().i('PlayerController: loading released by $reason');
+    _setLoading(false);
+  }
+
+  void _setLoading(bool value) {
+    if (loading == value) {
+      return;
+    }
+    loading = value;
+  }
+
+  /// 播放器已就绪（open 成功）：立刻收起遮罩，字幕/音轨/音量都算后台收尾。
+  void markStartupComplete() {
+    if (startupStalled) {
+      KazumiLogger().i('PlayerController: startup recovered after stall');
+      startupStalled = false;
+    }
+    _finishStartup(reason: 'open-complete');
+  }
+
+  /// 起播失败：收起遮罩，由上层决定显示哪种错误。
+  void markStartupFailed() {
+    _teardownStartupProbes();
+    _setLoading(false);
+  }
+
+  /// 有声音没画面探测：起播后 [_videoFrameDeadline] 内仍无首帧就处理一次。
+  void _armVideoWatchdog() {
+    if (_videoWatchdog != null || videoReady) {
+      return;
+    }
+    _videoWatchdog = Timer(_videoFrameDeadline, () {
+      _videoWatchdog = null;
+      final player = mediaPlayer;
+      if (player == null || videoReady) {
+        return;
+      }
+      var hasVideo = _hasVideoTrack;
+      if (!hasVideo) {
+        // 轨道列表可能比计时器晚，这里直接读当前状态兜底；播放器已释放时忽略。
+        try {
+          hasVideo = _hasUsableVideoTrack(player.state.tracks);
+        } catch (_) {
+          hasVideo = false;
+        }
+      }
+      if (!hasVideo) {
+        // 纯音频文件，或轨道列表压根没到（不是"画面没出来"），不打扰用户。
+        KazumiLogger().i(
+            'PlayerController: no video track reported, skip frame watchdog');
+        return;
+      }
+      startupStalled = true;
+      _setLoading(false);
+      KazumiLogger().w(
+          'PlayerController: audio is playing but no video frame in '
+          '${_videoFrameDeadline.inSeconds}s');
+      if (_softDecodeRetryTried || !hAenable) {
+        // 已经试过软解（或本来就是软解）：只给可操作的提示。
+        KazumiDialog.showToast(
+          message: '画面没有出来，可尝试关闭硬件解码或换一个视频来源',
+          duration: const Duration(seconds: 5),
+          showActionButton: true,
+        );
+        return;
+      }
+      unawaited(_retryWithSoftwareDecoder());
+    });
+  }
+
+  /// 关掉硬件解码后重开同一份媒体，每集只尝试一次。
+  Future<void> _retryWithSoftwareDecoder() async {
+    if (_softDecodeRetryTried) {
+      return;
+    }
+    final player = mediaPlayer;
+    final media = _currentMedia;
+    if (player == null || media == null) {
+      return;
+    }
+    _softDecodeRetryTried = true;
+    KazumiLogger().w(
+        'PlayerController: retrying with hardware decoding disabled');
+    KazumiDialog.showToast(
+      message: '画面未就绪，已切换软解重试',
+      duration: const Duration(seconds: 4),
+    );
+    try {
+      final pp = player.platform as NativePlayer;
+      await pp.setProperty('hwdec', 'no');
+      if (!isCurrentPlayer(player)) {
+        return;
+      }
+      videoReady = false;
+      _hasVideoTrack = false;
+      final Duration position = player.state.position;
+      final replay = Media(
+        media.uri,
+        start: position > Duration.zero ? position : media.start,
+        httpHeaders: media.httpHeaders,
+      );
+      _currentMedia = replay;
+      await player.open(replay, play: autoPlay);
+      if (!isCurrentPlayer(player)) {
+        return;
+      }
+      _armVideoWatchdog();
+    } catch (error) {
+      KazumiLogger().e(
+          'PlayerController: software decode retry failed', error: error);
+    }
+  }
+
   @action
   void resetForInit() {
+    _teardownStartupProbes();
+    videoReady = false;
+    startupStalled = false;
+    _hasVideoTrack = false;
+    _softDecodeRetryTried = false;
+    _currentMedia = null;
     playing = false;
     loading = true;
     isBuffering = true;
@@ -316,6 +548,7 @@ abstract class _PlayerPlaybackController with Store {
     }
     _ownedPlayer = candidate;
     cachePolicy.startWatching();
+    _armStartupProbes(player);
 
     try {
       debug.playerLog.clear();
@@ -468,11 +701,10 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
-      await player.open(
-        Media(videoUrl(),
-            start: Duration(seconds: offset), httpHeaders: httpHeaders),
-        play: autoPlay,
-      );
+      final media = Media(videoUrl(),
+          start: Duration(seconds: offset), httpHeaders: httpHeaders);
+      _currentMedia = media;
+      await player.open(media, play: autoPlay);
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
@@ -487,6 +719,8 @@ abstract class _PlayerPlaybackController with Store {
         cachePolicy.stopWatching();
         _ownedPlayer = null;
         videoController = null;
+        // 只拆自己的探针，别把已经开始的下一次开播的探针拆掉。
+        _teardownStartupProbes();
       }
       await candidate.dispose();
       Error.throwWithStackTrace(error, stackTrace);
@@ -628,6 +862,12 @@ abstract class _PlayerPlaybackController with Store {
 
   Future<void> stop() async {
     cachePolicy.stopWatching();
+    _teardownStartupProbes();
+    videoReady = false;
+    startupStalled = false;
+    _hasVideoTrack = false;
+    _softDecodeRetryTried = false;
+    _currentMedia = null;
     final ownedPlayer = _ownedPlayer;
     _ownedPlayer = null;
     videoController = null;

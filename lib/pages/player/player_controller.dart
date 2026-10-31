@@ -221,14 +221,28 @@ class PlayerController implements Disposable {
       if (initialization.isStale) {
         return false;
       }
-      playback.loading = false;
+      playback.markStartupFailed();
       KazumiLogger()
           .e('PlayerController: failed to initialize video', error: e);
       return false;
     }
-    if (player == null || !_ownsInitialization(initialization, player)) {
+    if (player == null) {
+      // 没有拿到播放器：一定要把加载遮罩收掉，否则会永远停在「播放器加载中」。
+      // 只有仍是当前会话才收尾，避免踩到已经开始的下一次开播。
+      if (initialization.isActive) {
+        playback.markStartupFailed();
+        KazumiLogger().e('PlayerController: playback controller not created');
+      }
       return false;
     }
+    if (!_ownsInitialization(initialization, player)) {
+      return false;
+    }
+
+    // open() 已经成功：先收起「播放器加载中」遮罩。字幕发现、音轨选择、
+    // 音量同步都是后台收尾，不该继续挡住画面（WebDAV 上这几个 await 卡住时
+    // 会出现「一直转圈但有声音」）。
+    playback.markStartupComplete();
 
     await subtitle.attach(
       player,
@@ -297,7 +311,7 @@ class PlayerController implements Disposable {
       return false;
     }
     KazumiLogger().i('PlayerController: video initialized');
-    playback.loading = false;
+    playback.markStartupComplete();
 
     coverUrl = params.coverUrl;
 

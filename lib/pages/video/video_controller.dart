@@ -681,7 +681,9 @@ abstract class _VideoPageController with Store implements Disposable {
       unawaited(_refreshSubjectLanguage(playerController));
       unawaited(_loadPlaybackDanmaku(playerController, params, session));
     } else if (session.isActive) {
+      // 直链播放失败时要给出可操作的错误，否则只剩一块黑屏。
       _playbackSessions.cancel();
+      _failLoading('播放器初始化失败，请重试或换一个视频来源');
     }
   }
 
