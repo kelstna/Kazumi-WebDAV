@@ -1,25 +1,25 @@
 {
     "schema":  1,
     "version":  "2.3.9",
-    "build":  20315,
-    "tag":  "v2.3.9.20315",
-    "publishedAt":  "2026-10-31T10:44:18Z",
-    "notes":  "# Kazumi 修改版 2.3.9 (20315)\n\n## 本次更新\n\n- **控制层改成整体淡入淡出**：顶栏、底栏、右侧按钮、上下遮罩不再从屏幕边缘滑进来，改为原地淡入淡出，和系统状态栏用同一种运动方式——点屏幕时状态栏和控制界面是「一起出现的一张 UI」，不再是「一条蹦出来、一条滑下来」（VLC 的做法）。\n- **顶部栏让位量封顶 24dp**：修掉「状态栏和顶部控制栏之间空太多」。上一版按系统报的顶部 inset 下移，但这台机器的 ROM 报了 43dp、实际只画了 34dp 的图标带，所以空出一大截；现在最多只让 24dp，顶部栏图标落到状态栏图标下方约 6dp。\n- **隐藏状态下不响应点击**：淡入淡出时控件仍占着原来的位置，隐藏后已加了触摸忽略，不会点到看不见的按钮。\n- **状态栏时机不变**：控制界面出现时亮、消失动画结束后收。\n- **不受影响的部分**：竖屏小窗、画中画、桌面端布局；音量/亮度/快进 HUD；字幕/音轨/弹幕等一切功能。\n\n…（完整说明见 Release 页面）",
-    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20315",
+    "build":  20316,
+    "tag":  "v2.3.9.20316",
+    "publishedAt":  "2026-10-31T11:08:22Z",
+    "notes":  "# Kazumi 修改版 2.3.9 (20316)\n\n## 本次更新\n\n- **状态栏收回时机对齐 VLC**：点屏幕收起控制层时，状态栏**当场就收**；上一版是等控制层淡出 300ms 之后才收，所以看起来比 VLC 慢了两三倍。\n- **顶部让位量固定为 24dp**（无边框播放页里），不再跟着系统 inset 变化。这是之前必须延迟收状态栏的原因——现在不会跳到，状态栏什么时候收都不影响顶部控制栏的位置。\n- **淡入淡出保持不变**：控制层（顶栏 / 底栏 / 遮罩）仍是原地淡入淡出。\n- **不受影响**：字幕 / 音轨 / 弹幕 / 更新等功能，竖屏小窗、画中画、桌面端。\n\n…（完整说明见 Release 页面）",
+    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20316",
     "assets":  [
                    {
                        "variant":  "replace",
-                       "file":  "Kazumi-2.3.9-20315-android-arm64.apk",
-                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20315/Kazumi-2.3.9-20315-android-arm64.apk",
-                       "sha256":  "b830b31f707eecb42d060becc2936bb19dec4f60ad052bb8bb11e7918cba6ee0",
-                       "size":  33608717
+                       "file":  "Kazumi-2.3.9-20316-android-arm64.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20316/Kazumi-2.3.9-20316-android-arm64.apk",
+                       "sha256":  "716bb4a1b949c9549b926a9f251da5f055541e1ee5622b1ee6825abe0aeffb04",
+                       "size":  33612629
                    },
                    {
                        "variant":  "coexist",
-                       "file":  "Kazumi-2.3.9-20315-android-arm64-coexist.apk",
-                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20315/Kazumi-2.3.9-20315-android-arm64-coexist.apk",
-                       "sha256":  "99d1c9edb560936258130c71a131e9c89b5014e93762a858a6cdcd127cb06411",
-                       "size":  33608701
+                       "file":  "Kazumi-2.3.9-20316-android-arm64-coexist.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20316/Kazumi-2.3.9-20316-android-arm64-coexist.apk",
+                       "sha256":  "6445ae4b462244703e5608d866819c7a219f078932a62c8dbb87a5f22de5df30",
+                       "size":  33612741
                    }
                ]
 }

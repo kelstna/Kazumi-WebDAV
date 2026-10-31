@@ -973,23 +973,13 @@ class _PlayerItemState extends State<PlayerItem>
   bool get _canHidePlayerPanel =>
       playerController.panel.canHidePlayerPanel && _playerPanelHolds.isEmpty;
 
-  /// The controls count as on screen while they slide out, so the status bar
-  /// leaves together with them instead of shifting the row mid animation.
-  bool get _playerControlsOnScreen =>
-      playerController.panel.showVideoController ||
-      _panelVisibilityController.value > 0;
-
+  /// The status bar leaves the moment the controls start to hide, like VLC.
+  /// The top row keeps a fixed inset, so nothing shifts when the bar goes.
   void _syncStatusBarOverlay() {
     unawaited(DisplayModeService.setStatusBarOverlay(
       owner: this,
-      visible: _playerControlsOnScreen,
+      visible: playerController.panel.showVideoController,
     ));
-  }
-
-  void _handlePanelVisibilityStatus(AnimationStatus status) {
-    if (status == AnimationStatus.dismissed) {
-      _syncStatusBarOverlay();
-    }
   }
 
   void showVideoController({bool restartHideTimer = true}) {
@@ -1351,7 +1341,6 @@ class _PlayerItemState extends State<PlayerItem>
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    _panelVisibilityController.addStatusListener(_handlePanelVisibilityStatus);
     _controlsVisibilityListener = mobx.reaction<bool>(
       (_) => playerController.panel.showVideoController,
       (_) => _syncStatusBarOverlay(),
@@ -1414,7 +1403,6 @@ class _PlayerItemState extends State<PlayerItem>
     hideTimer?.cancel();
     mouseScrollerTimer?.cancel();
     _adjustmentHudHideTimer?.cancel();
-    _panelVisibilityController.removeStatusListener(_handlePanelVisibilityStatus);
     _panelVisibilityController.dispose();
     _screenshotFeedbackController.dispose();
     _disposePlayerMenu();

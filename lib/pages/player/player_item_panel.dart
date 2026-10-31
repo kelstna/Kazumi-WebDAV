@@ -434,10 +434,13 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       );
 
   Widget _buildPanel(bool compact) {
-    // Zero while immersive; the status bar height once the controls reveal it.
-    // Capped: see [_maxTopControlsInset].
-    final double topInset =
-        math.min(MediaQuery.paddingOf(context).top, _maxTopControlsInset);
+    // The immersive player keeps a fixed inset, so the top row never shifts
+    // when the status bar comes or goes (that is what made its retract look
+    // slow: the row had to wait for the inset to collapse). Elsewhere the
+    // system inset is the truth, capped: see [_maxTopControlsInset].
+    final double topInset = !isDesktop() && widget.fillsWindow
+        ? _maxTopControlsInset
+        : math.min(MediaQuery.paddingOf(context).top, _maxTopControlsInset);
     return Stack(
       alignment: Alignment.center,
       children: [
