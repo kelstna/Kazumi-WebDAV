@@ -1,25 +1,25 @@
 {
     "schema":  1,
     "version":  "2.3.9",
-    "build":  20318,
-    "tag":  "v2.3.9.20318",
-    "publishedAt":  "2026-10-31T12:06:05Z",
-    "notes":  "- **状态栏图标常显白色**：亮画面（白底动画）下系统会按背景亮度自动把状态栏图标翻成黑色，现在把控制层的黑色遮罩加深，并在原生侧同时声明浅色图标，让状态栏始终是白的。\n- **遮罩加深、顶底同色**：顶栏 / 底栏遮罩用同一个颜色常量（黑色 75%），仍是一条平滑渐变，没有纯黑硬边；顶部遮罩的出现速度快于状态栏下滑，避免下滑过程中「黑→白」闪一下。\n- **锁定状态：左右各一个解锁按钮**，同一图标、同一动作，垂直居中、左右同距，左手右手都按得到；锁定后**不再出现状态栏**。\n- **未锁定状态**：右侧仍是「截图 + 锁定」两个按钮；左右两列共用同一个**动态避让**边距，所以右侧这组会整体内移，与锁定态左侧按钮镜像对称。\n- **前摄自动避让**：边距取「系统栏 inset」和「挖孔（viewPadding）」左右最大值，横屏前摄在左时两侧一起让出同样宽度；换方向、换设备自动跟随，**没有设置项**。",
-    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20318",
+    "build":  20319,
+    "tag":  "v2.3.9.20319",
+    "publishedAt":  "2026-11-01T08:12:02Z",
+    "notes":  "# Kazumi 修改版 2.3.9 (20319)\n\n## 本次更新\n\n- **音量手势跟手**：上下滑音量的写入从「尾触发防抖」改成 50ms 节流——之前手指一直在动时定时器被不断重置，整个拖动过程一次都不写设备音量，松手才\"啪\"地跳到最终值。\n- **不再弹系统音量条**：写系统音量前强制 `showSystemUI=false`，只在离开播放页时才恢复。系统音量条会抢焦点、打断手势。\n- **拖动中控制层不消失**：音量/亮度手势期间冻结控制层的自动隐藏，避免拖动中途面板和状态栏一起收掉导致整页重排。\n- **修首次调音从 0 开始**：读设备音量失败时不再把音量写成 0（保持\"未知\"），开始音量手势时补读一次再算起点。\n- **竖屏点屏幕有反应了**：顶部/底部两块渐变遮罩改成不接收触摸（纯装饰层），之前竖屏播放器 94% 的面积被它们挡住，点击到不了「点屏幕呼出控制层」。\n- **锁定/解锁按钮位置**：左右两列放到**画面两侧的垂直中线**、距屏幕边 30dp，图标离开前摄挖孔、也不再压着画面边缘；锁定态左右各一个同款解锁按钮，未锁定态右侧「截图 + 锁定」。\n\n…（完整说明见 Release 页面）",
+    "releaseUrl":  "https://github.com/kelstna/Kazumi-WebDAV/releases/tag/v2.3.9.20319",
     "assets":  [
                    {
                        "variant":  "replace",
-                       "file":  "Kazumi-2.3.9-20318-android-arm64.apk",
-                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20318/Kazumi-2.3.9-20318-android-arm64.apk",
-                       "sha256":  "93f52dc0ea05790eb82eb147ac19fcf239fa2c0d14e33eb9621c04c09422495e",
-                       "size":  33620485
+                       "file":  "Kazumi-2.3.9-20319-android-arm64.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20319/Kazumi-2.3.9-20319-android-arm64.apk",
+                       "sha256":  "84139385bc8e7ce25eb5ae73480e3184ac675998b7aae71f578aff1dddd1bbd3",
+                       "size":  33620829
                    },
                    {
                        "variant":  "coexist",
-                       "file":  "Kazumi-2.3.9-20318-android-arm64-coexist.apk",
-                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20318/Kazumi-2.3.9-20318-android-arm64-coexist.apk",
-                       "sha256":  "0bf2bbca6f574298a747e3bb6ccb238f06acbca281c9aadeb55ac34382a17dc4",
-                       "size":  33620357
+                       "file":  "Kazumi-2.3.9-20319-android-arm64-coexist.apk",
+                       "url":  "https://github.com/kelstna/Kazumi-WebDAV/releases/download/v2.3.9.20319/Kazumi-2.3.9-20319-android-arm64-coexist.apk",
+                       "sha256":  "cd99b5c74d5d0f2cbdebd56df6ea33aacdc0afc1470abe406425f5e32081d0a4",
+                       "size":  33620781
                    }
                ]
 }

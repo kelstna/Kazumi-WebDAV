@@ -813,6 +813,10 @@ abstract class _PlayerPlaybackController with Store {
       if (isDesktop()) {
         await mediaPlayer!.setVolume(vol);
       } else {
+        // Never raise the system volume UI while writing: it steals focus and
+        // makes a drag feel laggy. On Android this is only a Dart-side flag,
+        // so it costs nothing.
+        await FlutterVolumeController.updateShowSystemUI(false);
         await FlutterVolumeController.setVolume(vol / 100);
       }
     } catch (_) {}

@@ -1651,6 +1651,10 @@ class _PlayerItemState extends State<PlayerItem>
                                 if (!brightnessVolumeGesture) {
                                   return;
                                 }
+                                // Freeze auto-hide for the whole adjustment: a
+                                // panel/status bar collapse mid-drag relayouts
+                                // the page and makes the volume feel laggy.
+                                _cancelHideTimer();
                                 final double totalWidth =
                                     MediaQuery.sizeOf(context).width;
                                 final double totalHeight =
@@ -1673,6 +1677,10 @@ class _PlayerItemState extends State<PlayerItem>
                                   setBrightness(result);
                                   playerController.panel.brightness = result;
                                 } else {
+                                  // A failed startup read leaves the level
+                                  // unknown; re-read before using it as the
+                                  // gesture base, otherwise it starts at 0.
+                                  await playerController.ensureVolumeKnown();
                                   _showVolumeAdjustmentHud();
                                   if (!playerController.panel.volumeSeeking) {
                                     playerController.panel.volumeSeeking = true;
@@ -1693,9 +1701,11 @@ class _PlayerItemState extends State<PlayerItem>
                               },
                               onVerticalDragEnd: (_) {
                                 _finishAdjustmentGesture();
+                                _startHideTimer();
                               },
                               onVerticalDragCancel: () {
                                 _finishAdjustmentGesture();
+                                _startHideTimer();
                               },
                             ),
                     ),

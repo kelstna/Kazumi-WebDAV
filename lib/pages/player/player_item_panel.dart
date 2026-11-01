@@ -456,7 +456,6 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     final double topInset = !isDesktop() && widget.fillsWindow
         ? _maxTopControlsInset
         : math.min(MediaQuery.paddingOf(context).top, _maxTopControlsInset);
-    final double sideInset = _sideInsetOf(context);
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -543,8 +542,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     ? playerController.panel.showVideoController
                     : true,
                 child: widget.disableAnimations
-                    ? _buildRightControls(sideInset)
-                    : _fadeWhenHidden(_buildRightControls(sideInset)),
+                    ? _buildRightControls()
+                    : _fadeWhenHidden(_buildRightControls()),
               );
             }),
           ),
@@ -565,8 +564,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     ? playerController.panel.showVideoController
                     : true,
                 child: widget.disableAnimations
-                    ? _buildLeftControls(sideInset)
-                    : _fadeWhenHidden(_buildLeftControls(sideInset)),
+                    ? _buildLeftControls()
+                    : _fadeWhenHidden(_buildLeftControls()),
               );
             }),
           ),
@@ -632,9 +631,14 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           visible: !playerController.panel.lockPanel &&
               (!widget.disableAnimations ||
                   playerController.panel.showVideoController),
-          child: widget.disableAnimations
-              ? scrim
-              : FadeTransition(opacity: opacity, child: scrim),
+          // Purely decorative: a tap in the top/bottom band must still reach
+          // the player's tap-to-toggle handler, especially in portrait where
+          // these two bands cover almost the whole player.
+          child: IgnorePointer(
+            child: widget.disableAnimations
+                ? scrim
+                : FadeTransition(opacity: opacity, child: scrim),
+          ),
         );
       });
 
@@ -1057,76 +1061,70 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     );
   }
 
-  /// Mirrors whichever side the front camera is on, and is the same for both
-  /// edges so the two button columns stay symmetric. No setting: it follows the
-  /// display cutout, which viewPadding keeps even while the bars are hidden.
-  double _sideInsetOf(BuildContext context) {
-    final EdgeInsets bars = MediaQuery.paddingOf(context);
-    final EdgeInsets cutout = MediaQuery.viewPaddingOf(context);
-    return math.max(
-      math.max(bars.left, bars.right),
-      math.max(cutout.left, cutout.right),
-    );
-  }
-
   void _togglePanelLock() {
     playerController.panel.lockPanel = !playerController.panel.lockPanel;
   }
 
-  Widget _buildRightControls(double sideInset) {
+  /// Side buttons sit at the vertical middle of the picture and just clear of
+  /// the front camera (a punch hole lives on the middle of a display edge once
+  /// rotated). 12dp put the icon behind the lens, so they move towards the
+  /// picture instead of hugging the screen edge.
+  static const double _sideEdgeInset = 30.0;
+
+  Widget _sideColumn({
+    required bool alignLeft,
+    required List<Widget> buttons,
+  }) {
     return Padding(
-      padding: EdgeInsets.only(right: sideInset),
+      padding: EdgeInsets.only(
+        left: alignLeft ? _sideEdgeInset : 0,
+        right: alignLeft ? 0 : _sideEdgeInset,
+      ),
       child: PlayerPanelHoldMouseRegion(
         acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
         cursor: SystemMouseCursors.basic,
         child: Column(
-          children: [
-            const Spacer(),
-            if (!playerController.panel.lockPanel)
-              IconButton(
-                icon: const Icon(
-                  Icons.photo_camera_outlined,
-                  color: Colors.white,
-                ),
-                tooltip: '截图',
-                onPressed: widget.handleScreenShot,
-              ),
-            IconButton(
-              icon: Icon(
-                playerController.panel.lockPanel
-                    ? Icons.lock_outline
-                    : Icons.lock_open,
-                color: Colors.white,
-              ),
-              tooltip: playerController.panel.lockPanel ? '解锁面板' : '锁定面板',
-              onPressed: _togglePanelLock,
-            ),
-            const Spacer(),
-          ],
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: buttons,
         ),
       ),
     );
   }
 
-  /// Locked state only: the same unlock button as the right column, mirrored.
-  Widget _buildLeftControls(double sideInset) {
-    return Padding(
-      padding: EdgeInsets.only(left: sideInset),
-      child: PlayerPanelHoldMouseRegion(
-        acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
-        cursor: SystemMouseCursors.basic,
-        child: Column(
-          children: [
-            const Spacer(),
+  Widget _buildRightControls() => _sideColumn(
+        alignLeft: false,
+        buttons: [
+          if (!playerController.panel.lockPanel)
             IconButton(
-              icon: const Icon(Icons.lock_outline, color: Colors.white),
-              tooltip: '解锁面板',
-              onPressed: _togglePanelLock,
+              icon: const Icon(
+                Icons.photo_camera_outlined,
+                color: Colors.white,
+              ),
+              tooltip: '截图',
+              onPressed: widget.handleScreenShot,
             ),
-            const Spacer(),
-          ],
-        ),
-      ),
-    );
-  }
+          IconButton(
+            icon: Icon(
+              playerController.panel.lockPanel
+                  ? Icons.lock_outline
+                  : Icons.lock_open,
+              color: Colors.white,
+            ),
+            tooltip: playerController.panel.lockPanel ? '解锁面板' : '锁定面板',
+            onPressed: _togglePanelLock,
+          ),
+        ],
+      );
+
+  /// Locked state only: the same unlock button as the right column, mirrored.
+  Widget _buildLeftControls() => _sideColumn(
+        alignLeft: true,
+        buttons: [
+          IconButton(
+            icon: const Icon(Icons.lock_outline, color: Colors.white),
+            tooltip: '解锁面板',
+            onPressed: _togglePanelLock,
+          ),
+        ],
+      );
 }

@@ -131,11 +131,33 @@ class PlayerController implements Disposable {
     }
   }
 
+  /// The system media volume is the authority on phones. If the startup read
+  /// failed the current level is unknown (-1); without this the first gesture
+  /// would clamp to 0 and the volume would "start from silence".
+  Future<void> ensureVolumeKnown() async {
+    if (playback.volume >= 0) {
+      return;
+    }
+    try {
+      final value = await FlutterVolumeController.getVolume();
+      if (value != null) {
+        playback.applyExternalVolume(value * 100);
+      }
+    } catch (e) {
+      KazumiLogger().w('PlayerController: failed to read device volume',
+          error: e);
+    }
+  }
+
   void setVolumeDuringGesture(double value) {
     _pendingGestureVolume = value.clamp(0.0, 100.0);
     playback.updateVolume(_pendingGestureVolume!);
-    _volumeGestureSyncTimer?.cancel();
-    _volumeGestureSyncTimer = Timer(const Duration(milliseconds: 80), () {
+    // Throttle, not debounce: recreating the timer on every drag update meant
+    // nothing was written to the device until the finger stopped, so the sound
+    // only caught up after release. One write per window keeps it in step with
+    // the finger without flooding the platform channel.
+    _volumeGestureSyncTimer ??= Timer(const Duration(milliseconds: 50), () {
+      _volumeGestureSyncTimer = null;
       final vol = _pendingGestureVolume;
       if (vol == null) {
         return;
@@ -272,8 +294,16 @@ class PlayerController implements Disposable {
         return false;
       }
     } else {
+      // Missing read must stay "unknown" (-1), not 0: a 0 here makes the first
+      // volume gesture start from silence. ensureVolumeKnown() retries lazily.
       await FlutterVolumeController.getVolume().then((value) {
-        playback.volume = (value ?? 0.0) * 100;
+        if (value == null) {
+          KazumiLogger().w('PlayerController: device volume unavailable');
+          return;
+        }
+        playback.volume = value * 100;
+        KazumiLogger().i(
+            'PlayerController: volume seeded from device: ${(value * 100).round()}');
       });
       if (!_ownsInitialization(initialization, player)) {
         return false;
